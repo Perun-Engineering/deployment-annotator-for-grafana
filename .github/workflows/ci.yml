@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["**"]  # Run on any branch push for developer validation
+    branches: ["**"] # Run on any branch push for developer validation
   pull_request:
-    branches: [main]  # PR validation only for main branch
+    branches: [main] # PR validation only for main branch
 
 permissions:
   contents: read
@@ -261,14 +261,7 @@ jobs:
     name: CI Success
     runs-on: ubuntu-latest
     needs:
-      [
-        lint,
-        security,
-        test,
-        helm-lint,
-        docker-validate,
-        vulnerability-scan,
-      ]
+      [lint, security, test, helm-lint, docker-validate, vulnerability-scan]
     if: always()
     steps:
       - name: Check all jobs
