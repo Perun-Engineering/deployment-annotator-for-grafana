@@ -252,7 +252,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check conventional commits
-        uses: wagoid/commitlint-github-action@v5
+        uses: wagoid/commitlint-github-action@v6
         with:
           configFile: ".commitlintrc.json"
 
