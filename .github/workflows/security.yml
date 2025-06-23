@@ -4,9 +4,8 @@ on:
   schedule:
     # Run security scans daily at 2 AM UTC
     - cron: "0 2 * * *"
-  push:
-    branches: ["**"]  # Run security checks on any branch
   pull_request:
+    types: [opened, edited, synchronize, reopened]
     branches: [main]
   workflow_dispatch:
 
