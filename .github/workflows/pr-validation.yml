@@ -55,74 +55,16 @@ jobs:
         ignoreLabels: |
           ignore-semantic-pull-request
 
-  # Validate that PR has appropriate labels
-  validate-pr-labels:
-    name: Validate PR Labels
-    runs-on: ubuntu-latest
-    steps:
-    - name: Check for required labels
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const { data: pullRequest } = await github.rest.pulls.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: context.issue.number,
-          });
-
-          const labels = pullRequest.labels.map(label => label.name);
-          const requiredLabels = ['type:', 'priority:', 'size:'];
-          const typeLabels = labels.filter(label => label.startsWith('type:'));
-          const priorityLabels = labels.filter(label => label.startsWith('priority:'));
-          const sizeLabels = labels.filter(label => label.startsWith('size:'));
-
-          const missingLabels = [];
-          if (typeLabels.length === 0) missingLabels.push('type: (e.g., type:feature, type:bugfix)');
-          if (priorityLabels.length === 0) missingLabels.push('priority: (e.g., priority:high, priority:medium, priority:low)');
-          if (sizeLabels.length === 0) missingLabels.push('size: (e.g., size:small, size:medium, size:large)');
-
-          if (missingLabels.length > 0) {
-            const comment = `## ⚠️ Missing Required Labels
-
-          This PR is missing the following required labels:
-          ${missingLabels.map(label => `- ${label}`).join('\n')}
-
-          Please add the appropriate labels to help with PR categorization and review prioritization.
-
-          ### Available Labels:
-
-          **Type:**
-          - \`type:feature\` - New feature or enhancement
-          - \`type:bugfix\` - Bug fix
-          - \`type:docs\` - Documentation changes
-          - \`type:refactor\` - Code refactoring
-          - \`type:security\` - Security improvements
-          - \`type:performance\` - Performance improvements
-          - \`type:ci\` - CI/CD changes
-
-          **Priority:**
-          - \`priority:critical\` - Critical/urgent changes
-          - \`priority:high\` - High priority
-          - \`priority:medium\` - Medium priority
-          - \`priority:low\` - Low priority
-
-          **Size:**
-          - \`size:small\` - Small changes (< 100 lines)
-          - \`size:medium\` - Medium changes (100-500 lines)
-          - \`size:large\` - Large changes (> 500 lines)
-          - \`size:xl\` - Extra large changes (> 1000 lines)`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: comment
-            });
-
-            core.setFailed(`Missing required labels: ${missingLabels.join(', ')}`);
-          } else {
-            console.log('✅ All required labels are present');
-          }
+  # Validate that PR has appropriate labels - DISABLED
+  # validate-pr-labels:
+  #   name: Validate PR Labels
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - name: Check for required labels
+  #     uses: actions/github-script@v7
+  #     with:
+  #       script: |
+  #         # Label validation disabled for simplified workflow
 
   # Check PR size and complexity
   check-pr-size:
@@ -290,7 +232,7 @@ jobs:
   pr-validation-summary:
     name: PR Validation Summary
     runs-on: ubuntu-latest
-    needs: [validate-pr-title, validate-pr-labels, check-pr-size, validate-pr-description]
+    needs: [validate-pr-title, check-pr-size, validate-pr-description]
     if: always()
     steps:
     - name: Validation summary
@@ -300,13 +242,11 @@ jobs:
         echo "| Check | Status |"
         echo "|-------|--------|"
         echo "| PR Title (Conventional Commits) | ${{ needs.validate-pr-title.result }} |"
-        echo "| PR Labels | ${{ needs.validate-pr-labels.result }} |"
         echo "| PR Size Analysis | ${{ needs.check-pr-size.result }} |"
         echo "| PR Description | ${{ needs.validate-pr-description.result }} |"
         echo ""
 
         if [[ "${{ needs.validate-pr-title.result }}" == "success" && \
-              "${{ needs.validate-pr-labels.result }}" == "success" && \
               "${{ needs.check-pr-size.result }}" == "success" && \
               "${{ needs.validate-pr-description.result }}" == "success" ]]; then
           echo "✅ All PR validations passed!"
