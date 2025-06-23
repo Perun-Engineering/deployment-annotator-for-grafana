@@ -1,0 +1,53 @@
+name: Cleanup
+
+on:
+  schedule:
+    # Run cleanup weekly on Sundays at 3 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+jobs:
+  # Clean up old workflow runs
+  cleanup-workflows:
+    name: Cleanup Workflow Runs
+    runs-on: ubuntu-latest
+    steps:
+    - name: Delete old workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ github.token }}
+        repository: ${{ github.repository }}
+        retain_days: 30
+        keep_minimum_runs: 10
+
+  # Clean up old caches
+  cleanup-caches:
+    name: Cleanup Caches
+    runs-on: ubuntu-latest
+    steps:
+    - name: Cleanup old caches
+      run: |
+        # Get list of caches older than 7 days
+        gh api repos/${{ github.repository }}/actions/caches \
+          --jq '.actions_caches[] | select(.created_at < (now - 7*24*3600 | strftime("%Y-%m-%dT%H:%M:%SZ"))) | .id' \
+          | xargs -I {} gh api --method DELETE repos/${{ github.repository }}/actions/caches/{}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Summary
+  cleanup-summary:
+    name: Cleanup Summary
+    runs-on: ubuntu-latest
+    needs: [cleanup-workflows, cleanup-caches]
+    if: always()
+    steps:
+    - name: Cleanup summary
+      run: |
+        echo "## Cleanup Summary 🧹"
+        echo ""
+        echo "| Task | Status |"
+        echo "|------|--------|"
+        echo "| Workflow Runs | ${{ needs.cleanup-workflows.result }} |"
+        echo "| Caches | ${{ needs.cleanup-caches.result }} |"
+        echo ""
+        echo "Cleanup completed on $(date)"

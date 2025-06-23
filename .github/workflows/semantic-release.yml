@@ -1,0 +1,56 @@
+name: Semantic Release
+
+on:
+  workflow_run:
+    workflows: ["Multi-Arch Build"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Semantic release with automated versioning
+  semantic-release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    # Only run if Multi-Arch Build succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 22
+          extra_plugins: |
+            @semantic-release/changelog@6
+            @semantic-release/git@10
+            @semantic-release/exec@6
+            conventional-changelog-conventionalcommits@7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Output release information
+        if: steps.semantic.outputs.new-release-published == 'true'
+        run: |
+          echo "🎉 New release published!"
+          echo "Version: ${{ steps.semantic.outputs.new-release-version }}"
+          echo "Multi-arch images have been pre-validated and published."
+          echo "The 'Release' workflow will now publish:"
+          echo "- Helm chart to OCI registry with release tag"
+          echo "- Cross-platform binary releases"
+          echo "- Release artifacts and checksums"

@@ -1,0 +1,79 @@
+# Default values for deployment-annotator-controller
+replicaCount: 2
+
+image:
+  repository: ghcr.io/perun-engineering/deployment-annotator-for-grafana
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  type: ClusterIP
+  healthPort: 8080
+  metricsPort: 8081
+
+resources:
+  # Adjust based on cluster size and number of deployments
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Grafana configuration
+grafana:
+  # URL of your Grafana instance (required)
+  url: ""
+  # API key for Grafana (required)
+  # This should be provided via --set-string or values override
+  apiKey: ""
+
+# Controller configuration
+controller:
+  # Maximum number of concurrent reconciles
+  maxConcurrentReconciles: 5
+
+# RBAC configuration
+rbac:
+  create: true

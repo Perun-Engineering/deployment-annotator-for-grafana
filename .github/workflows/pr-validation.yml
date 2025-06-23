@@ -1,0 +1,311 @@
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]  # Focus on main branch PRs only
+
+jobs:
+  # Validate PR title follows conventional commits
+  validate-pr-title:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate PR title
+      uses: amannn/action-semantic-pull-request@v5.5.3
+      with:
+        # Configure which types are allowed (must match semantic-release config)
+        types: |
+          feat
+          fix
+          docs
+          style
+          refactor
+          perf
+          test
+          build
+          ci
+          chore
+          revert
+        # Configure which scopes are allowed (optional)
+        scopes: |
+          webhook
+          helm
+          ci
+          docs
+          security
+          deps
+          release
+        # Require a scope to be provided
+        requireScope: false
+        # Disable validation of the subject's case
+        subjectPattern: ^(?![A-Z]).+$
+        subjectPatternError: |
+          The subject "{subject}" found in the pull request title "{title}"
+          didn't match the configured pattern. Please ensure that the subject
+          doesn't start with an uppercase character.
+        # GitHub token for API access
+        githubToken: ${{ secrets.GITHUB_TOKEN }}
+        # Ignore merge commits
+        ignoreLabels: |
+          ignore-semantic-pull-request
+
+  # Validate that PR has appropriate labels
+  validate-pr-labels:
+    name: Validate PR Labels
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check for required labels
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+
+          const labels = pullRequest.labels.map(label => label.name);
+          const requiredLabels = ['type:', 'priority:', 'size:'];
+          const typeLabels = labels.filter(label => label.startsWith('type:'));
+          const priorityLabels = labels.filter(label => label.startsWith('priority:'));
+          const sizeLabels = labels.filter(label => label.startsWith('size:'));
+
+          const missingLabels = [];
+          if (typeLabels.length === 0) missingLabels.push('type: (e.g., type:feature, type:bugfix)');
+          if (priorityLabels.length === 0) missingLabels.push('priority: (e.g., priority:high, priority:medium, priority:low)');
+          if (sizeLabels.length === 0) missingLabels.push('size: (e.g., size:small, size:medium, size:large)');
+
+          if (missingLabels.length > 0) {
+            const comment = `## ⚠️ Missing Required Labels
+
+          This PR is missing the following required labels:
+          ${missingLabels.map(label => `- ${label}`).join('\n')}
+
+          Please add the appropriate labels to help with PR categorization and review prioritization.
+
+          ### Available Labels:
+
+          **Type:**
+          - \`type:feature\` - New feature or enhancement
+          - \`type:bugfix\` - Bug fix
+          - \`type:docs\` - Documentation changes
+          - \`type:refactor\` - Code refactoring
+          - \`type:security\` - Security improvements
+          - \`type:performance\` - Performance improvements
+          - \`type:ci\` - CI/CD changes
+
+          **Priority:**
+          - \`priority:critical\` - Critical/urgent changes
+          - \`priority:high\` - High priority
+          - \`priority:medium\` - Medium priority
+          - \`priority:low\` - Low priority
+
+          **Size:**
+          - \`size:small\` - Small changes (< 100 lines)
+          - \`size:medium\` - Medium changes (100-500 lines)
+          - \`size:large\` - Large changes (> 500 lines)
+          - \`size:xl\` - Extra large changes (> 1000 lines)`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+            core.setFailed(`Missing required labels: ${missingLabels.join(', ')}`);
+          } else {
+            console.log('✅ All required labels are present');
+          }
+
+  # Check PR size and complexity
+  check-pr-size:
+    name: Check PR Size
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check PR size
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+
+          const additions = pullRequest.additions;
+          const deletions = pullRequest.deletions;
+          const changedFiles = pullRequest.changed_files;
+          const totalChanges = additions + deletions;
+
+          console.log(`PR Statistics:
+          - Files changed: ${changedFiles}
+          - Lines added: ${additions}
+          - Lines deleted: ${deletions}
+          - Total changes: ${totalChanges}`);
+
+          let sizeLabel = '';
+          let sizeComment = '';
+
+          if (totalChanges < 100) {
+            sizeLabel = 'size:small';
+            sizeComment = '🟢 **Small PR** - Easy to review';
+          } else if (totalChanges < 500) {
+            sizeLabel = 'size:medium';
+            sizeComment = '🟡 **Medium PR** - Moderate complexity';
+          } else if (totalChanges < 1000) {
+            sizeLabel = 'size:large';
+            sizeComment = '🟠 **Large PR** - Consider breaking into smaller PRs';
+          } else {
+            sizeLabel = 'size:xl';
+            sizeComment = '🔴 **Extra Large PR** - Strongly consider breaking into smaller PRs for easier review';
+          }
+
+          // Add size label if not already present
+          const labels = pullRequest.labels.map(label => label.name);
+          const hasSizeLabel = labels.some(label => label.startsWith('size:'));
+
+          if (!hasSizeLabel) {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [sizeLabel]
+            });
+          }
+
+          // Add comment for large PRs
+          if (totalChanges >= 500) {
+            const comment = `## 📊 PR Size Analysis
+
+          ${sizeComment}
+
+          **Statistics:**
+          - 📁 Files changed: ${changedFiles}
+          - ➕ Lines added: ${additions}
+          - ➖ Lines deleted: ${deletions}
+          - 📈 Total changes: ${totalChanges}
+
+          ${totalChanges >= 1000 ? `
+          ### 💡 Suggestions for Large PRs:
+          - Consider breaking this PR into smaller, focused changes
+          - Ensure comprehensive testing for all changes
+          - Add detailed description of all modifications
+          - Consider pair programming or additional reviewers
+          ` : ''}
+
+          *This comment was automatically generated based on PR size analysis.*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+          }
+
+  # Validate that PR has proper description
+  validate-pr-description:
+    name: Validate PR Description
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check PR description
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+
+          const body = pullRequest.body || '';
+          const minLength = 50;
+
+          if (body.length < minLength) {
+            const comment = `## 📝 PR Description Required
+
+          This PR needs a more detailed description to help reviewers understand the changes.
+
+          **Current description length:** ${body.length} characters
+          **Minimum required:** ${minLength} characters
+
+          ### Please include:
+          - 🎯 **What** - What changes are being made?
+          - 🤔 **Why** - Why are these changes necessary?
+          - 🧪 **Testing** - How were the changes tested?
+          - 📸 **Screenshots** - If UI changes, include before/after screenshots
+          - 🔗 **Related Issues** - Link to related issues or tickets
+
+          ### Template:
+          \`\`\`markdown
+          ## Description
+          Brief description of the changes
+
+          ## Motivation and Context
+          Why is this change required? What problem does it solve?
+
+          ## How Has This Been Tested?
+          - [ ] Unit tests
+          - [ ] Integration tests
+          - [ ] Manual testing
+
+          ## Types of changes
+          - [ ] Bug fix (non-breaking change which fixes an issue)
+          - [ ] New feature (non-breaking change which adds functionality)
+          - [ ] Breaking change (fix or feature that would cause existing functionality to change)
+
+          ## Checklist:
+          - [ ] My code follows the code style of this project
+          - [ ] My change requires a change to the documentation
+          - [ ] I have updated the documentation accordingly
+          \`\`\`
+
+          *Please update the PR description and this check will pass automatically.*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+            core.setFailed(`PR description is too short (${body.length} characters, minimum ${minLength} required)`);
+          } else {
+            console.log('✅ PR description meets minimum requirements');
+          }
+
+  # Summary of all validations
+  pr-validation-summary:
+    name: PR Validation Summary
+    runs-on: ubuntu-latest
+    needs: [validate-pr-title, validate-pr-labels, check-pr-size, validate-pr-description]
+    if: always()
+    steps:
+    - name: Validation summary
+      run: |
+        echo "## PR Validation Summary 📋"
+        echo ""
+        echo "| Check | Status |"
+        echo "|-------|--------|"
+        echo "| PR Title (Conventional Commits) | ${{ needs.validate-pr-title.result }} |"
+        echo "| PR Labels | ${{ needs.validate-pr-labels.result }} |"
+        echo "| PR Size Analysis | ${{ needs.check-pr-size.result }} |"
+        echo "| PR Description | ${{ needs.validate-pr-description.result }} |"
+        echo ""
+
+        if [[ "${{ needs.validate-pr-title.result }}" == "success" && \
+              "${{ needs.validate-pr-labels.result }}" == "success" && \
+              "${{ needs.check-pr-size.result }}" == "success" && \
+              "${{ needs.validate-pr-description.result }}" == "success" ]]; then
+          echo "✅ All PR validations passed!"
+        else
+          echo "❌ Some PR validations failed. Please address the issues above."
+          exit 1
+        fi

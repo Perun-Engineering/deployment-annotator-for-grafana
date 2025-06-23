@@ -1,0 +1,294 @@
+name: Multi-Arch Build
+
+on:
+  push:
+    branches: ["**"]  # Run on any branch for early multi-platform validation
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches: [main]  # Maintain release flow for main branch
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platforms to build for (comma-separated)"
+        required: false
+        default: "linux/amd64,linux/arm64"
+        type: string
+      push_images:
+        description: "Push images to registry (for feature branches)"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Check that all required workflows completed successfully (only for main branch releases)
+  check-prerequisites:
+    name: Check Prerequisites
+    runs-on: ubuntu-latest
+    # Only run prerequisite checks for main branch workflow_run events
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      ci-success: ${{ steps.check-ci.outputs.conclusion }}
+      security-success: ${{ steps.check-security.outputs.conclusion }}
+      all-success: ${{ steps.check-all.outputs.all-success }}
+    steps:
+      - name: Check CI workflow status
+        id: check-ci
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              head_sha: context.sha,
+              per_page: 1
+            });
+
+            const conclusion = runs.workflow_runs[0]?.conclusion || 'unknown';
+            console.log(`CI workflow conclusion: ${conclusion}`);
+            core.setOutput('conclusion', conclusion);
+            return conclusion;
+
+      - name: Check Security workflow status
+        id: check-security
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'security.yml',
+              head_sha: context.sha,
+              per_page: 1
+            });
+
+            const conclusion = runs.workflow_runs[0]?.conclusion || 'unknown';
+            console.log(`Security workflow conclusion: ${conclusion}`);
+            core.setOutput('conclusion', conclusion);
+            return conclusion;
+
+      - name: Check all prerequisites
+        id: check-all
+        run: |
+          CI_SUCCESS="${{ steps.check-ci.outputs.conclusion }}"
+          SECURITY_SUCCESS="${{ steps.check-security.outputs.conclusion }}"
+
+          echo "CI Status: $CI_SUCCESS"
+          echo "Security Status: $SECURITY_SUCCESS"
+
+          if [[ "$CI_SUCCESS" == "success" && "$SECURITY_SUCCESS" == "success" ]]; then
+            echo "✅ All prerequisites met"
+            echo "all-success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Prerequisites not met"
+            echo "all-success=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Build multi-arch images
+  build-multi-arch:
+    name: Build Multi-Arch Images
+    runs-on: ubuntu-latest
+    needs: check-prerequisites
+    # Run if: prerequisites passed (main branch) OR direct push (feature branch) OR manual dispatch
+    if: ${{ always() && (needs.check-prerequisites.outputs.all-success == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "IMAGE_NAME=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+          labels: |
+            org.opencontainers.image.title=Grafana Annotation Controller
+            org.opencontainers.image.description=Kubernetes Controller for creating Grafana deployment annotations
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push multi-arch Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
+          # Push logic: always push for main, or when push_images input is true, or for workflow_run events
+          push: ${{ github.ref == 'refs/heads/main' || github.event.inputs.push_images == 'true' || github.event_name == 'workflow_run' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Inspect multi-arch image
+        if: ${{ github.ref == 'refs/heads/main' || github.event.inputs.push_images == 'true' || github.event_name == 'workflow_run' }}
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          TAG="$REF_NAME"
+          echo "Inspecting multi-arch image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}
+
+  # Test multi-arch images
+  test-multi-arch:
+    name: Test Multi-Arch Images
+    runs-on: ubuntu-latest
+    needs: [check-prerequisites, build-multi-arch]
+    # Test images when they are pushed: main branch, explicit push request, or workflow_run
+    if: ${{ always() && needs.build-multi-arch.result == 'success' && (github.ref == 'refs/heads/main' || github.event.inputs.push_images == 'true' || github.event_name == 'workflow_run') }}
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Set environment variables
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "IMAGE_NAME=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test image on platform
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          TAG="$REF_NAME"
+
+          echo "Testing image on $PLATFORM"
+          # Pull and test the image
+          docker run --rm --platform "$PLATFORM" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG} \
+            --help || echo "Image test completed for $PLATFORM"
+
+  # Vulnerability scan
+  security-scan:
+    name: Security Scan Multi-Arch Image
+    runs-on: ubuntu-latest
+    needs: [check-prerequisites, build-multi-arch]
+    if: needs.check-prerequisites.outputs.all-success == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Set environment variables
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "IMAGE_NAME=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # Summary
+  build-summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs:
+      [check-prerequisites, build-multi-arch, test-multi-arch, security-scan]
+    if: always()
+    steps:
+      - name: Set environment variables
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "IMAGE_NAME=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Build summary
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          PREREQ_RESULT: ${{ needs.check-prerequisites.result }}
+          BUILD_RESULT: ${{ needs.build-multi-arch.result }}
+          TEST_RESULT: ${{ needs.test-multi-arch.result }}
+          SCAN_RESULT: ${{ needs.security-scan.result }}
+          CI_SUCCESS: ${{ needs.check-prerequisites.outputs.ci-success }}
+          SECURITY_SUCCESS: ${{ needs.check-prerequisites.outputs.security-success }}
+        run: |
+          echo "## Multi-Arch Build Summary 🏗️"
+          echo ""
+          echo "| Job | Status |"
+          echo "|-----|--------|"
+          echo "| Prerequisites Check | $PREREQ_RESULT |"
+          echo "| ├─ CI Workflow | $CI_SUCCESS |"
+          echo "| └─ Security Workflow | $SECURITY_SUCCESS |"
+          echo "| Build Multi-Arch Images | $BUILD_RESULT |"
+          echo "| Test Multi-Arch Images | $TEST_RESULT |"
+          echo "| Security Scan | $SCAN_RESULT |"
+          echo ""
+
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TAG="$REF_NAME"
+            echo "**Built Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}\`"
+            echo ""
+            echo "**Platforms**: linux/amd64, linux/arm64"
+            echo ""
+            echo "**Pull Command**:"
+            echo "\`\`\`bash"
+            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+            echo "\`\`\`"
+          fi
+
+          if [[ "$PREREQ_RESULT" == "success" && "$BUILD_RESULT" == "success" ]]; then
+            echo ""
+            echo "✅ All workflows completed successfully!"
+          else
+            echo ""
+            echo "❌ One or more workflows failed"
+            if [[ "$PREREQ_RESULT" != "success" ]]; then
+              echo "  - Prerequisites check failed (CI: $CI_SUCCESS, Security: $SECURITY_SUCCESS)"
+            fi
+            if [[ "$BUILD_RESULT" != "success" ]]; then
+              echo "  - Multi-arch build failed"
+            fi
+            exit 1
+          fi

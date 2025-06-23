@@ -1,0 +1,76 @@
+name: Release Request
+description: Request a new release of the project
+title: "[Release]: "
+labels: ["release", "triage"]
+assignees:
+  - perun-engineering
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for requesting a new release! This will help us track release requests and ensure proper versioning.
+
+  - type: dropdown
+    id: release-type
+    attributes:
+      label: Release Type
+      description: What type of release is this?
+      options:
+        - patch (bug fixes, documentation updates)
+        - minor (new features, backwards compatible)
+        - major (breaking changes)
+        - prerelease (alpha, beta, rc)
+    validations:
+      required: true
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: Changes Since Last Release
+      description: What changes have been made since the last release?
+      placeholder: |
+        - Added new feature X
+        - Fixed bug Y
+        - Updated documentation for Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking-changes
+    attributes:
+      label: Breaking Changes
+      description: Are there any breaking changes? (Required for major releases)
+      placeholder: |
+        - Changed API endpoint from /old to /new
+        - Removed deprecated configuration option
+        - Updated minimum Kubernetes version requirement
+
+  - type: checkboxes
+    id: release-checklist
+    attributes:
+      label: Release Checklist
+      description: Please ensure all items are completed before release
+      options:
+        - label: All tests are passing
+          required: true
+        - label: Documentation has been updated
+          required: true
+        - label: CHANGELOG.md has been reviewed
+          required: false
+        - label: Security scan has passed
+          required: true
+        - label: Multi-arch builds are working
+          required: true
+        - label: Helm chart version has been updated
+          required: true
+
+  - type: textarea
+    id: additional-notes
+    attributes:
+      label: Additional Notes
+      description: Any additional information about this release
+      placeholder: |
+        - Special deployment considerations
+        - Migration instructions
+        - Known issues or limitations

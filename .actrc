@@ -1,0 +1,12 @@
+# Act configuration file
+# Use medium-sized runner image for better compatibility
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Use container architecture for M1 Macs
+--container-architecture linux/amd64
+
+# Set default secrets (you can override these)
+-s GITHUB_TOKEN=dummy_token
+
+# Enable verbose logging for debugging
+--verbose

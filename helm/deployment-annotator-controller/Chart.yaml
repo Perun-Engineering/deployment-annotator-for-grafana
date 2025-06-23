@@ -1,0 +1,13 @@
+apiVersion: v2
+name: deployment-annotator-controller
+description: A Kubernetes Controller that creates Grafana annotations for deployment events
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+keywords:
+  - grafana
+  - kubernetes
+  - controller
+  - annotations
+  - deployments
+home: https://github.com/perun-engineering/deployment-annotator-for-grafana

@@ -1,0 +1,57 @@
+repos:
+  # Go formatting and basic checks
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: go fmt
+        description: Runs gofmt, requires golang
+        entry: bash -c 'gofmt -l -s -w .'
+        language: system
+        files: '\.go$'
+        pass_filenames: false
+
+      - id: go-vet
+        name: go vet
+        description: Runs go vet, requires golang
+        entry: bash -c 'go vet ./...'
+        language: system
+        files: '\.go$'
+        pass_filenames: false
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        description: Runs go mod tidy, requires golang
+        entry: bash -c 'go mod tidy'
+        language: system
+        files: 'go\.(mod|sum)$|\.go$'
+        pass_filenames: false
+
+  # golangci-lint for comprehensive linting
+  - repo: local
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint (if available)
+        description: Fast linters runner for Go - skipped if not installed
+        entry: bash
+        args:
+          - -c
+          - golangci-lint run --enable=lll --enable=errcheck --enable=govet --enable=ineffassign --enable=staticcheck --enable=unused --timeout=5m
+        language: system
+        files: '\.go$'
+        pass_filenames: false
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+        exclude: '\.md$'
+      - id: check-yaml
+        exclude: 'helm/.*\.yaml$' # Skip Helm templates
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]

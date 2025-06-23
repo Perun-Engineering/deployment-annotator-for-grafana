@@ -1,0 +1,20 @@
+# Global owners
+* @perun-engineering
+
+# Go code
+*.go @perun-engineering
+
+# Kubernetes manifests
+helm/ @perun-engineering
+examples/ @perun-engineering
+
+# CI/CD
+.github/ @perun-engineering
+
+# Documentation
+*.md @perun-engineering
+docs/ @perun-engineering
+
+# Security-sensitive files
+.github/workflows/security.yml @perun-engineering
+Dockerfile @perun-engineering
