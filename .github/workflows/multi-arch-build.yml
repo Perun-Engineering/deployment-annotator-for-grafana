@@ -159,7 +159,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          TAG="$REF_NAME"
+          # Sanitize branch name for Docker tag (replace / with -)
+          TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
           echo "Inspecting multi-arch image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}
 
@@ -193,7 +194,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           PLATFORM: ${{ matrix.platform }}
         run: |
-          TAG="$REF_NAME"
+          # Sanitize branch name for Docker tag (replace / with -)
+          TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
 
           echo "Testing image on $PLATFORM"
           # Pull and test the image
@@ -217,10 +219,19 @@ jobs:
         run: |
           echo "IMAGE_NAME=$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
+      - name: Set sanitized tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Sanitize branch name for Docker tag (replace / with -)
+          TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
+          echo "SANITIZED_TAG=${TAG}" >> $GITHUB_ENV
+          echo "Scanning image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SANITIZED_TAG }}
           format: "sarif"
           output: "trivy-results.sarif"
 
@@ -267,7 +278,8 @@ jobs:
           echo ""
 
           if [ "$EVENT_NAME" != "pull_request" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            TAG="$REF_NAME"
+            # Sanitize branch name for Docker tag (replace / with -)
+            TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
             echo "**Built Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}\`"
             echo ""
             echo "**Platforms**: linux/amd64, linux/arm64"
