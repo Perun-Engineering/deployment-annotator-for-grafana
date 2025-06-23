@@ -134,7 +134,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.title=Grafana Annotation Controller
             org.opencontainers.image.description=Kubernetes Controller for creating Grafana deployment annotations
