@@ -1,13 +1,14 @@
 name: Multi-Arch Build
 
 on:
-  push:
-    branches: ["**"]  # Run on any branch for early multi-platform validation
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main] # Focus on main branch PRs only
   workflow_run:
     workflows: ["CI"]
     types:
       - completed
-    branches: [main]  # Maintain release flow for main branch
+    branches: [main] # Maintain release flow for main branch
   workflow_dispatch:
     inputs:
       platforms:
