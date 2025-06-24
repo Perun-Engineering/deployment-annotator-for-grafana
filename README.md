@@ -2,15 +2,9 @@
 
 ## Badges
 
-[![CI](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/CI/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/ci.yml)
-[![Security](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Security/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/security.yml)
-[![Release](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Release/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/release.yml)
+[![CI](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/CI/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/ci.yml) [![Security](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Security/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/security.yml) [![Release](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Release/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/release.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/perun-engineering/deployment-annotator-for-grafana)](https://goreportcard.com/report/github.com/perun-engineering/deployment-annotator-for-grafana) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/perun-engineering/deployment-annotator-for-grafana/pkgs/container/deployment-annotator-for-grafana)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/perun-engineering/deployment-annotator-for-grafana)](https://goreportcard.com/report/github.com/perun-engineering/deployment-annotator-for-grafana)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/perun-engineering/deployment-annotator-for-grafana/pkgs/container/deployment-annotator-for-grafana)
-
-A production-ready Kubernetes Controller that automatically creates per-component Grafana annotations for deployment events, providing granular timing visibility that traditional CI/CD pipeline annotations cannot offer.
+A production-ready Kubernetes Controller that automatically creates per-component [Grafana annotations](https://grafana.com/docs/grafana/latest/developers/http_api/annotations/) for deployment events, providing granular timing visibility that traditional CI/CD pipeline annotations cannot offer.
 
 ## Why This Tool?
 
@@ -36,37 +30,11 @@ In traditional CI/CD pipelines, deployment annotations are typically created man
 
 ### Problems with Traditional Approach
 
-#### 1. **Coarse-Grained Timing**
-- **Single timeline** for entire Helm chart deployment
-- **Cannot distinguish** between individual component deployment times
-- **Hides deployment bottlenecks** within multi-component applications
-
-#### 2. **Multi-Component Helm Charts**
-Consider a typical microservices Helm chart with multiple deployments:
-
-```yaml
-# helm-chart/templates/
-├── frontend-deployment.yaml      # Takes 30 seconds to be ready
-├── backend-deployment.yaml       # Takes 2 minutes to be ready
-├── database-deployment.yaml      # Takes 5 minutes to be ready
-├── cache-deployment.yaml         # Takes 10 seconds to be ready
-└── worker-deployment.yaml        # Takes 1 minute to be ready
-```
-
-**Traditional annotation timeline:**
-```
-CI/CD Start ────────────────────────────────────── CI/CD End
-     │                                                  │
-     └── Single annotation covering entire 5+ minutes ──┘
-```
-
-**Problem**: You can't see that the database was the bottleneck while cache deployed quickly.
-
-#### 3. **Independent Component Lifecycles**
-- Components have **different resource requirements**
-- Components have **different startup times**
-- Components may **fail independently**
-- Pipeline annotations **mask individual component behavior**
+- **Coarse-Grained Timing**: Single timeline for entire Helm chart deployment
+- **No Component Visibility**: Cannot distinguish between individual component deployment times
+- **Hidden Bottlenecks**: Masks which specific components are slow to deploy
+- **Independent Lifecycles**: Components have different startup times and may fail independently
+- **Scaling vs Deployment Confusion**: Pipeline annotations don't distinguish between scaling and actual updates
 
 ### This Controller's Approach
 
@@ -116,21 +84,6 @@ Cache:     Started 10:00 → Finished 10:00 (10 seconds)
 4. **SLA Tracking**: Monitor component-level deployment SLAs
 5. **Team Accountability**: Different teams can track their component's deployment performance
 
-### **Example: Microservices Platform**
-
-A typical e-commerce platform with this controller shows:
-
-```grafana
-Cart Service:     ├──┤ (15s) - Lightweight, fast startup
-Product Service:  ├─────┤ (45s) - Medium complexity
-Payment Service:  ├────────────┤ (2m) - Heavy validation startup
-Search Service:   ├──────────────────┤ (3m) - Elasticsearch indexing
-Analytics:        ├─┤ (8s) - Stateless, very fast
-```
-
-**Without this controller**: Single 3-minute annotation hiding that analytics and cart deploy quickly while search is the bottleneck.
-
-**With this controller**: Clear visibility that search service needs optimization while cart and analytics are performing well.
 
 ## Overview
 
@@ -168,7 +121,7 @@ This controller watches `apps/v1` **Deployments** in namespaces labeled with `de
 
 ```bash
 # Install the controller
-helm install deployment-annotator-controller ./helm/deployment-annotator-controller \
+helm install deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
   --set grafana.url=https://your-grafana-instance.com \
   --set-string grafana.apiKey=your-grafana-api-key
 ```
@@ -340,11 +293,10 @@ sequenceDiagram
         C->>G: POST /api/annotations/graphite (start)
         G->>C: Return annotation ID
         C->>K8s: Update deployment with annotation ID + version
-    end
-    Note over C: Event-driven completion detection
-    K8s->>C: ReplicaSet ready event
-    C->>C: Check deployment readiness
-    C->>G: POST /api/annotations/graphite (end)
+        Note over C: Event-driven completion detection
+        K8s->>C: ReplicaSet ready event
+        C->>C: Check deployment readiness
+        C->>G: POST /api/annotations/graphite (end)
         G->>C: Return end annotation ID
         C->>G: PATCH /api/annotations/{start-id} (create time region)
     else Same version (scaling/status)
