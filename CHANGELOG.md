@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.0.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.1...v1.0.2) (2025-06-24)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** more fixes to the helm chart publishing ([32df87f](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/32df87fe05de4031335d4598cc7f02a51351ba9c))
+
 ## [1.0.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.0...v1.0.1) (2025-06-24)
 
 
