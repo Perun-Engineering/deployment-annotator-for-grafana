@@ -168,7 +168,7 @@ This controller watches `apps/v1` **Deployments** in namespaces labeled with `de
 
 ```bash
 # Install the controller
-helm install grafana-controller ./helm/deployment-annotator-controller \
+helm install deployment-annotator-controller ./helm/deployment-annotator-controller \
   --set grafana.url=https://your-grafana-instance.com \
   --set-string grafana.apiKey=your-grafana-api-key
 ```
