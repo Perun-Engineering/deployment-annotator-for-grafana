@@ -201,23 +201,23 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Update the default image tag in values.yaml to match the release version
-          sed -i "s/tag: \"latest\"/tag: \"$RELEASE_VERSION\"/" helm/deployment-annotator/values.yaml
+          sed -i "s/tag: \"latest\"/tag: \"$RELEASE_VERSION\"/" helm/deployment-annotator-controller/values.yaml
 
           # Update appVersion in Chart.yaml to match the release version
-          sed -i "s/appVersion: \"[^\"]*\"/appVersion: \"$RELEASE_VERSION\"/" helm/deployment-annotator/Chart.yaml
+          sed -i "s/appVersion: \"[^\"]*\"/appVersion: \"$RELEASE_VERSION\"/" helm/deployment-annotator-controller/Chart.yaml
 
           # Verify the changes
           echo "Updated values.yaml image tag:"
-          grep -A 3 "image:" helm/deployment-annotator/values.yaml
+          grep -A 3 "image:" helm/deployment-annotator-controller/values.yaml
           echo ""
           echo "Updated Chart.yaml appVersion:"
-          grep "appVersion:" helm/deployment-annotator/Chart.yaml
+          grep "appVersion:" helm/deployment-annotator-controller/Chart.yaml
 
       - name: Verify chart version
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHART_VERSION=$(grep '^version:' helm/deployment-annotator/Chart.yaml | cut -d' ' -f2)
+          CHART_VERSION=$(grep '^version:' helm/deployment-annotator-controller/Chart.yaml | cut -d' ' -f2)
           if [ "$CHART_VERSION" != "$RELEASE_VERSION" ]; then
             echo "Chart version ($CHART_VERSION) doesn't match release version ($RELEASE_VERSION)"
             echo "This should have been updated by semantic-release"
