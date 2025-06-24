@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.0.3](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.2...v1.0.3) (2025-06-24)
+
+
+### 📚 Documentation
+
+* improve README documentation ([d09cf28](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/d09cf286090c04a2c8f785b95ae87ed09b2d6718))
+
 ## [1.0.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.1...v1.0.2) (2025-06-24)
 
 
