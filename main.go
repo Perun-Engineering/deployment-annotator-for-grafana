@@ -23,6 +23,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -76,8 +77,41 @@ func sanitizeForLog(input string) string {
 	return sanitized
 }
 
-// computeDeploymentVersion creates a version string from generation and image tag
-func computeDeploymentVersion(deployment *appsv1.Deployment, imageTag string) string {
+// computeDeploymentVersion creates a version string from pod template hash and image tag
+// Uses ReplicaSet's pod template hash to avoid feedback loops from annotation updates
+func (r *DeploymentReconciler) computeDeploymentVersion(
+	ctx context.Context, deployment *appsv1.Deployment, imageTag string,
+) string {
+	// Get the current ReplicaSet to extract pod template hash
+	replicaSets := &appsv1.ReplicaSetList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(deployment.Namespace),
+		client.MatchingLabels(deployment.Spec.Selector.MatchLabels),
+	}
+	if err := r.List(ctx, replicaSets, listOpts...); err != nil {
+		// Fallback to generation if we can't get ReplicaSets
+		return fmt.Sprintf("gen-%d-img-%s", deployment.Generation, imageTag)
+	}
+
+	// Find the current ReplicaSet (the one owned by this deployment with latest revision)
+	var currentRS *appsv1.ReplicaSet
+	for i := range replicaSets.Items {
+		rs := &replicaSets.Items[i]
+		if metav1.IsControlledBy(rs, deployment) {
+			if currentRS == nil || rs.CreationTimestamp.After(currentRS.CreationTimestamp.Time) {
+				currentRS = rs
+			}
+		}
+	}
+
+	if currentRS != nil {
+		// Use the pod template hash from the ReplicaSet
+		if podTemplateHash, exists := currentRS.Labels["pod-template-hash"]; exists {
+			return fmt.Sprintf("hash-%s-img-%s", podTemplateHash, imageTag)
+		}
+	}
+
+	// Fallback to generation if we can't get pod template hash
 	return fmt.Sprintf("gen-%d-img-%s", deployment.Generation, imageTag)
 }
 
@@ -165,7 +199,7 @@ func (r *DeploymentReconciler) handleDeploymentEvent(
 
 	imageRef := deployment.Spec.Template.Spec.Containers[0].Image
 	imageTag := r.extractImageTag(imageRef)
-	currentVersion := computeDeploymentVersion(deployment, imageTag)
+	currentVersion := r.computeDeploymentVersion(ctx, deployment, imageTag)
 	storedVersion := deployment.Annotations[GrafanaVersionAnnotation]
 	startAnnotationID := deployment.Annotations[GrafanaStartAnnotation]
 
@@ -550,6 +584,41 @@ func (r *DeploymentReconciler) mapReplicaSetToDeployment(_ context.Context, obj 
 	return nil
 }
 
+// specChangedPredicate only triggers on spec changes, not annotation changes
+// This prevents feedback loops from our own annotation updates
+func specChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldDeployment, ok := e.ObjectOld.(*appsv1.Deployment)
+			if !ok {
+				return false
+			}
+			newDeployment, ok := e.ObjectNew.(*appsv1.Deployment)
+			if !ok {
+				return false
+			}
+
+			// Only trigger if the spec actually changed
+			oldSpecBytes, _ := json.Marshal(oldDeployment.Spec)
+			newSpecBytes, _ := json.Marshal(newDeployment.Spec)
+
+			return !bytes.Equal(oldSpecBytes, newSpecBytes)
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Always process new deployments
+			return true
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Always process deletions
+			return true
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			// Process generic events
+			return true
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager
 func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -561,14 +630,7 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultMaxConcurrentReconciles,
 		}).
-		WithEventFilter(predicate.And(
-			predicate.GenerationChangedPredicate{},
-			predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				// Quick check - only process deployments in labeled namespaces
-				// We'll do a more thorough check in Reconcile function
-				return true // Keep simple for now, do full check in Reconcile
-			}),
-		)).
+		WithEventFilter(specChangedPredicate()).
 		Complete(r)
 }
 
