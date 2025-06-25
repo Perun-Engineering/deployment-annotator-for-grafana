@@ -169,9 +169,23 @@ func (r *DeploymentReconciler) handleDeploymentEvent(
 	storedVersion := deployment.Annotations[GrafanaVersionAnnotation]
 	startAnnotationID := deployment.Annotations[GrafanaStartAnnotation]
 
-	// Handle new deployment version detection
-	isNewDeploymentVersion := storedVersion == "" || storedVersion != currentVersion
-	if isNewDeploymentVersion {
+	// Handle deployment tracking logic
+	if storedVersion == "" {
+		// First time seeing this deployment - initialize tracking without annotations
+		logger.Info("Initializing tracking for existing deployment",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace),
+			"version", currentVersion)
+		return r.initializeDeploymentTracking(ctx, deployment, currentVersion)
+	}
+
+	if storedVersion != currentVersion {
+		// Real deployment change detected - create Grafana annotations
+		logger.Info("Deployment version changed - creating annotations",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace),
+			"oldVersion", storedVersion,
+			"newVersion", currentVersion)
 		return r.handleNewDeploymentVersion(ctx, deployment, currentVersion, imageRef, imageTag, startAnnotationID)
 	}
 
@@ -187,6 +201,31 @@ func (r *DeploymentReconciler) handleDeploymentEvent(
 	)
 }
 
+// initializeDeploymentTracking marks existing deployments for tracking without creating Grafana annotations
+// This is called during controller startup to establish baseline tracking for existing deployments
+func (r *DeploymentReconciler) initializeDeploymentTracking(
+	ctx context.Context, deployment *appsv1.Deployment, currentVersion string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Just mark the deployment with current version - no Grafana annotations
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to initialize deployment tracking",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	logger.V(1).Info("Deployment tracking initialized (no Grafana annotation created)",
+		"deployment", sanitizeForLog(deployment.Name),
+		"namespace", sanitizeForLog(deployment.Namespace),
+		"version", currentVersion)
+
+	return ctrl.Result{}, nil
+}
+
 // handleNewDeploymentVersion handles the logic for new deployment versions
 func (r *DeploymentReconciler) handleNewDeploymentVersion(
 	ctx context.Context, deployment *appsv1.Deployment, currentVersion, imageRef, imageTag, startAnnotationID string,
@@ -198,7 +237,7 @@ func (r *DeploymentReconciler) handleNewDeploymentVersion(
 	}
 
 	// Version changed but we already have annotations - clear them
-	if err := r.updateDeploymentAnnotations(ctx, deployment, map[string]string{
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
 		GrafanaStartAnnotation:   "",
 		GrafanaEndAnnotation:     "",
 		GrafanaVersionAnnotation: currentVersion,
@@ -231,7 +270,7 @@ func (r *DeploymentReconciler) createStartAnnotation(
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	if err := r.updateDeploymentAnnotations(ctx, deployment, map[string]string{
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
 		GrafanaStartAnnotation:   strconv.FormatInt(annotationID, 10),
 		GrafanaVersionAnnotation: currentVersion,
 	}); err != nil {
@@ -285,9 +324,9 @@ func (r *DeploymentReconciler) createEndAnnotation(
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	if err := r.updateDeploymentAnnotation(
-		ctx, deployment, GrafanaEndAnnotation, strconv.FormatInt(annotationID, 10),
-	); err != nil {
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaEndAnnotation: strconv.FormatInt(annotationID, 10),
+	}); err != nil {
 		logger.Error(err, "Failed to store end annotation ID",
 			"deployment", sanitizeForLog(deployment.Name),
 			"namespace", sanitizeForLog(deployment.Namespace))
@@ -463,34 +502,25 @@ func (r *DeploymentReconciler) updateGrafanaAnnotation(
 	return nil
 }
 
-// updateDeploymentAnnotation updates a deployment's annotation
-func (r *DeploymentReconciler) updateDeploymentAnnotation(
-	ctx context.Context, deployment *appsv1.Deployment, key, value string,
-) error {
-	return r.updateDeploymentAnnotations(ctx, deployment, map[string]string{key: value})
-}
-
-// updateDeploymentAnnotations updates multiple deployment annotations in a single operation
-func (r *DeploymentReconciler) updateDeploymentAnnotations(
+// patchDeploymentAnnotations patches deployment annotations using strategic merge
+func (r *DeploymentReconciler) patchDeploymentAnnotations(
 	ctx context.Context, deployment *appsv1.Deployment, annotations map[string]string,
 ) error {
-	// Get the latest version of the deployment
-	var current appsv1.Deployment
-	if err := r.Get(ctx, client.ObjectKeyFromObject(deployment), &current); err != nil {
-		return fmt.Errorf("failed to get current deployment: %w", err)
+	// Create patch for annotations
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": annotations,
+		},
 	}
 
-	// Update annotations
-	if current.Annotations == nil {
-		current.Annotations = make(map[string]string)
-	}
-	for key, value := range annotations {
-		current.Annotations[key] = value
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
 	}
 
-	// Update the deployment
-	if err := r.Update(ctx, &current); err != nil {
-		return fmt.Errorf("failed to update deployment: %w", err)
+	// Apply the patch
+	if err := r.Patch(ctx, deployment, client.RawPatch(client.Merge.Type(), patchBytes)); err != nil {
+		return fmt.Errorf("failed to patch deployment annotations: %w", err)
 	}
 
 	return nil
@@ -531,7 +561,14 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultMaxConcurrentReconciles,
 		}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		WithEventFilter(predicate.And(
+			predicate.GenerationChangedPredicate{},
+			predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				// Quick check - only process deployments in labeled namespaces
+				// We'll do a more thorough check in Reconcile function
+				return true // Keep simple for now, do full check in Reconcile
+			}),
+		)).
 		Complete(r)
 }
 
