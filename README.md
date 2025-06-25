@@ -126,24 +126,30 @@ helm install deployment-annotator-controller oci://ghcr.io/perun-engineering/dep
   --set-string grafana.apiKey=your-grafana-api-key
 ```
 
-### 2. Create Tracked Namespaces
+### 2. Enable Namespace Tracking
+
+Label your namespace to enable deployment tracking:
 
 ```bash
-# Apply test namespaces
-kubectl apply -f examples/test-namespace.yaml
+# Label your namespace for tracking
+kubectl label namespace your-namespace deployment-annotator=enabled
+
+# Or create a new test namespace with the label
+kubectl create namespace test-grafana-tracking
+kubectl label namespace test-grafana-tracking deployment-annotator=enabled
 ```
 
-### 3. Test with Sample Deployment
+### 3. Monitor Deployments
 
 ```bash
-# Deploy a test application
-kubectl apply -f examples/sample-deployment.yaml
+# Check controller logs to see deployment tracking
+kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+
+# Deploy or update any application in the labeled namespace
+kubectl apply -f your-deployment.yaml -n test-grafana-tracking
 
 # Monitor the deployment
-kubectl rollout status deployment/cart-service -n test-grafana-tracking
-
-# Check controller logs
-kubectl logs -l app.kubernetes.io/name=grafana-annotation-controller -f
+kubectl rollout status deployment/your-deployment -n test-grafana-tracking
 ```
 
 ## Configuration
