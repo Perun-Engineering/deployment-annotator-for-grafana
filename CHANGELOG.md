@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.0.7](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.6...v1.0.7) (2025-06-25)
+
+
+### 🐛 Bug Fixes
+
+* use ReplicaSet pod template hash to prevent feedback loops ([02f08d2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/02f08d24d56ab2520826401f0327340f8fb3ee4b))
+
 ## [1.0.6](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.0.5...v1.0.6) (2025-06-25)
 
 
