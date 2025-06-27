@@ -1,5 +1,5 @@
 # Default values for deployment-annotator-controller
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: ghcr.io/perun-engineering/deployment-annotator-for-grafana
@@ -73,6 +73,12 @@ grafana:
 controller:
   # Maximum number of concurrent reconciles
   maxConcurrentReconciles: 5
+  # Logging configuration
+  log:
+    # Log level (info, debug, error)
+    level: "info"
+    # Development mode (enables debug logs and stack traces)
+    development: false
 
 # RBAC configuration
 rbac:

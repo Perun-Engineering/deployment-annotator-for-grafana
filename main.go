@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,16 +35,16 @@ import (
 
 const (
 	// GrafanaIDAnnotation is the annotation key for storing Grafana annotation ID
-	GrafanaIDAnnotation = "grafana.io/annotation-id"
+	GrafanaIDAnnotation = "deployment-annotator.io/annotation-id"
 
 	// GrafanaStartAnnotation tracks the start annotation ID
-	GrafanaStartAnnotation = "grafana.io/start-annotation-id"
+	GrafanaStartAnnotation = "deployment-annotator.io/start-annotation-id"
 
 	// GrafanaEndAnnotation tracks the end annotation ID
-	GrafanaEndAnnotation = "grafana.io/end-annotation-id"
+	GrafanaEndAnnotation = "deployment-annotator.io/end-annotation-id"
 
 	// GrafanaVersionAnnotation tracks the deployment version (generation + image tag)
-	GrafanaVersionAnnotation = "grafana.io/tracked-version"
+	GrafanaVersionAnnotation = "deployment-annotator.io/tracked-version"
 
 	// HTTPTimeoutSeconds is the timeout for HTTP requests in seconds
 	HTTPTimeoutSeconds = 30
@@ -174,7 +175,7 @@ func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Processing deployment",
+	logger.V(1).Info("Processing deployment",
 		"deployment", sanitizeForLog(deployment.Name),
 		"namespace", sanitizeForLog(deployment.Namespace),
 		"generation", deployment.Generation,
@@ -270,24 +271,34 @@ func (r *DeploymentReconciler) handleNewDeploymentVersion(
 		return r.createStartAnnotation(ctx, deployment, currentVersion, imageRef, imageTag)
 	}
 
-	// Version changed but we already have annotations - clear them
-	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
-		GrafanaStartAnnotation:   "",
-		GrafanaEndAnnotation:     "",
-		GrafanaVersionAnnotation: currentVersion,
-	}); err != nil {
-		logger.Error(err, "Failed to clear annotations for version change",
+	// Version changed and we have existing annotations - update them in place
+	newStartAnnotationID, err := r.createGrafanaAnnotation(
+		deployment.Name, deployment.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create new start annotation for version change",
 			"deployment", sanitizeForLog(deployment.Name),
 			"namespace", sanitizeForLog(deployment.Namespace))
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	logger.Info("Deployment version changed, cleared previous annotations",
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(newStartAnnotationID, 10),
+		GrafanaEndAnnotation:     "", // Clear end annotation as deployment is starting again
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to update annotations for version change",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	logger.Info("Deployment version changed - updated annotations in place",
 		"deployment", sanitizeForLog(deployment.Name),
 		"namespace", sanitizeForLog(deployment.Namespace),
-		"newVersion", currentVersion)
+		"newVersion", currentVersion,
+		"newStartAnnotationID", newStartAnnotationID)
 
-	return ctrl.Result{RequeueAfter: time.Second * RequeueDelaySeconds}, nil
+	return ctrl.Result{}, nil
 }
 
 // createStartAnnotation creates a new start annotation for a deployment
@@ -645,7 +656,23 @@ func main() {
 	}
 
 	// Setup logging - use zap directly to avoid stack overflow
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	devMode := getEnvBool("LOG_DEVELOPMENT", false)
+	logLevel := getEnvString("LOG_LEVEL", "info")
+
+	var zapOpts []zap.Opts
+	zapOpts = append(zapOpts, zap.UseDevMode(devMode))
+
+	// Configure log level
+	switch logLevel {
+	case "debug":
+		zapOpts = append(zapOpts, zap.Level(zapcore.DebugLevel))
+	case "error":
+		zapOpts = append(zapOpts, zap.Level(zapcore.ErrorLevel))
+	default: // "info"
+		zapOpts = append(zapOpts, zap.Level(zapcore.InfoLevel))
+	}
+
+	ctrl.SetLogger(zap.New(zapOpts...))
 	logger := ctrl.Log.WithName("main")
 
 	// Print version information
@@ -724,4 +751,22 @@ func main() {
 		logger.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+}
+
+// getEnvString gets an environment variable as string with default value
+func getEnvString(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvBool gets an environment variable as boolean with default value
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }
