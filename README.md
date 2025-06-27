@@ -87,7 +87,7 @@ Cache:     Started 10:00 → Finished 10:00 (10 seconds)
 
 ## Overview
 
-This controller watches `apps/v1` **Deployments** in namespaces labeled with `deployment-annotator=enabled`. When a deployment specification actually changes (not just scaling), it:
+This controller watches `apps/v1` **Deployments** and **Namespaces**. It automatically processes deployments in namespaces labeled with `deployment-annotator=enabled` and provides instant annotation cleanup when labels are removed. When a deployment specification actually changes (not just scaling), it:
 
 1. Uses Kubernetes `generation` and image tag to create a version identifier
 2. Compares current version with previously stored version to detect actual changes
@@ -103,7 +103,8 @@ This controller watches `apps/v1` **Deployments** in namespaces labeled with `de
 - **Smart change detection**: Uses Kubernetes generation + image tag to detect actual deployment changes vs scaling events
 - **Event-driven completion**: Watches ReplicaSet events for instant deployment completion detection (no polling)
 - **KEDA/HPA compatible**: Ignores replica count changes, only tracks real application updates
-- **Namespace filtering**: Only processes deployments in namespaces with `deployment-annotator=enabled` label
+- **Dynamic namespace filtering**: Watches namespace label changes and immediately processes existing deployments
+- **Automatic annotation cleanup**: Removes all annotations when namespace label is removed
 - **Stateless operation**: Survives pod restarts by storing annotation IDs and versions in deployment annotations
 - **Production-ready**: Includes proper RBAC, security contexts, and health checks
 - **Helm deployment**: Complete Helm chart with configurable values
@@ -139,6 +140,8 @@ kubectl create namespace test-grafana-tracking
 kubectl label namespace test-grafana-tracking deployment-annotator=enabled
 ```
 
+> **Note:** The controller automatically detects namespace label changes. When you add the `deployment-annotator=enabled` label, all existing deployments in that namespace will immediately get start annotations for their current versions. When you remove the label, all deployment annotations will be cleaned up automatically.
+
 ### 3. Monitor Deployments
 
 ```bash
@@ -156,10 +159,12 @@ kubectl rollout status deployment/your-deployment -n test-grafana-tracking
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GRAFANA_URL` | Grafana instance URL | Yes |
-| `GRAFANA_API_KEY` | Grafana API key with annotation permissions | Yes |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `GRAFANA_URL` | Grafana instance URL | Yes | - |
+| `GRAFANA_API_KEY` | Grafana API key with annotation permissions | Yes | - |
+| `LOG_LEVEL` | Logging level (info, debug, error) | No | `info` |
+| `LOG_DEVELOPMENT` | Enable development mode logging | No | `false` |
 
 ### Helm Values
 
@@ -171,20 +176,76 @@ grafana:
   url: "https://your-grafana-instance.com"
   apiKey: "your-api-key"
 
+# Controller configuration
+controller:
+  maxConcurrentReconciles: 5
+  log:
+    level: "info"           # info, debug, error
+    development: false      # Enable debug logs and stack traces
+
 # Controller image
 image:
   repository: ghcr.io/perun-engineering/deployment-annotator-for-grafana
   tag: latest
 
+# Single replica to prevent race conditions
+replicaCount: 1
+
 # Resource limits
 resources:
   limits:
-    cpu: 500m
+    cpu: 100m
     memory: 128Mi
   requests:
-    cpu: 100m
+    cpu: 50m
     memory: 64Mi
 ```
+
+## Namespace Management
+
+### Enabling Tracking
+
+When you add the `deployment-annotator=enabled` label to a namespace, the controller immediately:
+
+1. **Discovers existing deployments** in that namespace
+2. **Creates start annotations** for all current deployment versions
+3. **Begins tracking future changes**
+
+```bash
+# Enable tracking for existing namespace with deployments
+kubectl label namespace production deployment-annotator=enabled
+
+# Controller logs will show:
+# "Namespace labeled for tracking, enqueuing deployments" namespace="production" deploymentCount=5
+# "Created deployment start annotation" deployment="api-server" namespace="production"
+# "Created deployment start annotation" deployment="worker" namespace="production"
+```
+
+### Disabling Tracking
+
+When you remove the label, the controller automatically:
+
+1. **Cleans up all annotations** from deployments in that namespace
+2. **Stops tracking future changes**
+3. **Removes deployment-annotator.io/ annotations** completely
+
+```bash
+# Disable tracking and clean up annotations
+kubectl label namespace production deployment-annotator-
+
+# Controller logs will show:
+# "Namespace label removed, cleaning up annotations" namespace="production" deploymentCount=5
+# "Cleaned up deployment annotations" deployment="api-server" namespace="production"
+# "Cleaned up deployment annotations" deployment="worker" namespace="production"
+```
+
+### Annotation Keys
+
+The controller manages these annotation keys on deployments:
+
+- `deployment-annotator.io/start-annotation-id` - Grafana start annotation ID
+- `deployment-annotator.io/end-annotation-id` - Grafana end annotation ID  
+- `deployment-annotator.io/tracked-version` - Current tracked version (generation + image tag)
 
 ## Grafana Configuration
 
@@ -271,7 +332,11 @@ Track specific applications:
 
 ### 1. Controller Registration
 
-The controller uses controller-runtime to watch Deployment resources in namespaces with the `deployment-annotator=enabled` label.
+The controller uses controller-runtime to watch both Deployment and Namespace resources:
+
+- **Deployment events**: Creates annotations when deployment specs change
+- **Namespace events**: Processes existing deployments when labels change  
+- **ReplicaSet events**: Tracks deployment completion status
 
 ### 2. Smart Change Detection
 
@@ -369,6 +434,94 @@ The controller exposes metrics and logs for monitoring:
 - **Metrics endpoint**: `/metrics` for Prometheus scraping (port 8081)
 - **Structured logging**: JSON logs with appropriate log levels
 - **Controller-runtime metrics**: Built-in metrics for reconciliation performance
+
+## Troubleshooting
+
+### Common Issues
+
+#### Deployments Not Getting Annotations
+
+1. **Check namespace label:**
+   ```bash
+   kubectl get namespace your-namespace --show-labels
+   # Should show: deployment-annotator=enabled
+   ```
+
+2. **Check controller logs:**
+   ```bash
+   kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+   # Look for: "Namespace labeled for tracking, enqueuing deployments"
+   ```
+
+3. **Verify deployment events:**
+   ```bash
+   # Enable debug logging to see all processing
+   helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+     --reuse-values \
+     --set controller.log.level=debug
+   ```
+
+#### Grafana API Errors
+
+1. **Check API key permissions:**
+   - Ensure the API key has `Editor` role or annotation permissions
+   - Test with curl: `curl -H "Authorization: Bearer YOUR_API_KEY" https://your-grafana.com/api/annotations`
+
+2. **Verify Grafana URL:**
+   ```bash
+   kubectl get configmap deployment-annotator-controller-config -o yaml
+   # Check GRAFANA_URL value
+   ```
+
+#### Missing Cleanup After Label Removal
+
+1. **Check for manual annotation removal:**
+   ```bash
+   kubectl get deployment your-deployment -o yaml | grep deployment-annotator.io
+   # Should show no results after label removal
+   ```
+
+2. **Controller restart may be needed:**
+   ```bash
+   kubectl rollout restart deployment deployment-annotator-controller
+   ```
+
+#### High Availability Mode Not Supported
+
+The controller currently does not support leader election and must run with a single replica to prevent race conditions:
+
+- **Race condition risk**: Multiple replicas create duplicate Grafana annotations and conflicting deployment updates
+- **Current limitation**: Controller lacks leader election mechanism
+- **Workaround**: Set `replicaCount: 1` in Helm values (default configuration)
+- **Impact**: Brief downtime during controller pod restart, but deployment tracking resumes automatically
+
+```bash
+# Ensure single replica configuration
+helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+  --reuse-values \
+  --set replicaCount=1
+```
+
+### Logging Configuration
+
+Enable debug logging for detailed troubleshooting:
+
+```bash
+# Enable debug mode
+helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+  --reuse-values \
+  --set controller.log.level=debug \
+  --set controller.log.development=true
+
+# View debug logs
+kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+```
+
+Debug logs will show:
+- Namespace processing decisions
+- Version comparison logic  
+- Grafana API request/response details
+- Annotation cleanup operations
 
 ## Contributing
 
