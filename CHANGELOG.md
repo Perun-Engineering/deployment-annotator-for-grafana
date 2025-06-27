@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.2.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.2.1...v1.2.2) (2025-06-27)
+
+
+### 🐛 Bug Fixes
+
+* move deployment predicate to For() to allow namespace events ([c680f36](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/c680f36b5ab8f2cef5669b9f954925532dc20b85))
+
 ## [1.2.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.2.0...v1.2.1) (2025-06-27)
 
 
