@@ -771,7 +771,7 @@ func namespaceLabelChangedPredicate() predicate.Predicate {
 // SetupWithManager sets up the controller with the Manager
 func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&appsv1.Deployment{}).
+		For(&appsv1.Deployment{}, builder.WithPredicates(specChangedPredicate())).
 		Watches(
 			&appsv1.ReplicaSet{},
 			handler.EnqueueRequestsFromMapFunc(r.mapReplicaSetToDeployment),
@@ -784,7 +784,6 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultMaxConcurrentReconciles,
 		}).
-		WithEventFilter(specChangedPredicate()).
 		Complete(r)
 }
 
