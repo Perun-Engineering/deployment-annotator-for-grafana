@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -595,6 +596,104 @@ func (r *DeploymentReconciler) mapReplicaSetToDeployment(_ context.Context, obj 
 	return nil
 }
 
+// mapNamespaceToDeployments maps namespace events to deployment reconcile requests
+func (r *DeploymentReconciler) mapNamespaceToDeployments(
+	ctx context.Context, namespace client.Object,
+) []reconcile.Request {
+	logger := log.FromContext(ctx)
+
+	// Get the namespace object
+	ns, ok := namespace.(*corev1.Namespace)
+	if !ok {
+		logger.Error(nil, "Failed to cast object to Namespace")
+		return nil
+	}
+
+	// Check if the namespace has the deployment-annotator label enabled
+	enabled := ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+
+	// List all deployments in this namespace
+	var deployments appsv1.DeploymentList
+	if err := r.List(ctx, &deployments, client.InNamespace(ns.Name)); err != nil {
+		logger.Error(err, "Failed to list deployments in namespace", "namespace", ns.Name)
+		return nil
+	}
+
+	// If label was removed, clean up annotations from all deployments
+	if !enabled {
+		logger.Info("Namespace label removed, cleaning up annotations",
+			"namespace", ns.Name,
+			"deploymentCount", len(deployments.Items))
+
+		for _, deployment := range deployments.Items {
+			if err := r.cleanupDeploymentAnnotations(ctx, &deployment); err != nil {
+				logger.Error(err, "Failed to cleanup annotations",
+					"deployment", deployment.Name,
+					"namespace", deployment.Namespace)
+			}
+		}
+		// Don't enqueue for reconciliation after cleanup
+		return nil
+	}
+
+	// Create reconcile requests for all deployments in the newly labeled namespace
+	var requests []reconcile.Request
+	for _, deployment := range deployments.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: client.ObjectKey{
+				Name:      deployment.Name,
+				Namespace: deployment.Namespace,
+			},
+		})
+	}
+
+	logger.Info("Namespace labeled for tracking, enqueuing deployments",
+		"namespace", ns.Name,
+		"deploymentCount", len(requests))
+
+	return requests
+}
+
+// cleanupDeploymentAnnotations removes all deployment-annotator.io annotations from a deployment
+func (r *DeploymentReconciler) cleanupDeploymentAnnotations(
+	ctx context.Context, deployment *appsv1.Deployment,
+) error {
+	logger := log.FromContext(ctx)
+
+	// Check if deployment has any of our annotations
+	hasAnnotations := false
+	annotationsToRemove := map[string]string{
+		GrafanaStartAnnotation:   "",
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: "",
+	}
+
+	if deployment.Annotations != nil {
+		for key := range annotationsToRemove {
+			if _, exists := deployment.Annotations[key]; exists {
+				hasAnnotations = true
+				break
+			}
+		}
+	}
+
+	// Nothing to clean up
+	if !hasAnnotations {
+		return nil
+	}
+
+	// Remove our annotations by setting them to empty (which removes them)
+	if err := r.patchDeploymentAnnotations(ctx, deployment, annotationsToRemove); err != nil {
+		return err
+	}
+
+	logger.Info("Cleaned up deployment annotations",
+		"deployment", sanitizeForLog(deployment.Name),
+		"namespace", sanitizeForLog(deployment.Namespace))
+
+	return nil
+}
+
 // specChangedPredicate only triggers on spec changes, not annotation changes
 // This prevents feedback loops from our own annotation updates
 func specChangedPredicate() predicate.Predicate {
@@ -630,6 +729,45 @@ func specChangedPredicate() predicate.Predicate {
 	}
 }
 
+// namespaceLabelChangedPredicate only triggers when deployment-annotator label changes
+func namespaceLabelChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			ns, ok := e.Object.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+			// Trigger if namespace is created with deployment-annotator=enabled
+			return ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNs, ok := e.ObjectOld.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+			newNs, ok := e.ObjectNew.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+
+			// Get old and new label values
+			oldEnabled := oldNs.Labels != nil && oldNs.Labels["deployment-annotator"] == "enabled"
+			newEnabled := newNs.Labels != nil && newNs.Labels["deployment-annotator"] == "enabled"
+
+			// Trigger if the label changed in either direction (enabled to disabled or disabled to enabled)
+			return oldEnabled != newEnabled
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Don't care about namespace deletions
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			// Don't care about generic events
+			return false
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager
 func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -637,6 +775,11 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&appsv1.ReplicaSet{},
 			handler.EnqueueRequestsFromMapFunc(r.mapReplicaSetToDeployment),
+		).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.mapNamespaceToDeployments),
+			builder.WithPredicates(namespaceLabelChangedPredicate()),
 		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultMaxConcurrentReconciles,
