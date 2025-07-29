@@ -2,15 +2,9 @@
 
 ## Badges
 
-[![CI](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/CI/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/ci.yml)
-[![Security](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Security/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/security.yml)
-[![Release](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Release/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/release.yml)
+[![CI](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/CI/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/ci.yml) [![Security](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Security/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/security.yml) [![Release](https://github.com/perun-engineering/deployment-annotator-for-grafana/workflows/Release/badge.svg)](https://github.com/perun-engineering/deployment-annotator-for-grafana/actions/workflows/release.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/perun-engineering/deployment-annotator-for-grafana)](https://goreportcard.com/report/github.com/perun-engineering/deployment-annotator-for-grafana) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/perun-engineering/deployment-annotator-for-grafana/pkgs/container/deployment-annotator-for-grafana)
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/perun-engineering/deployment-annotator-for-grafana)](https://goreportcard.com/report/github.com/perun-engineering/deployment-annotator-for-grafana)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/perun-engineering/deployment-annotator-for-grafana/pkgs/container/deployment-annotator-for-grafana)
-
-A production-ready Kubernetes Controller that automatically creates per-component Grafana annotations for deployment events, providing granular timing visibility that traditional CI/CD pipeline annotations cannot offer.
+A production-ready Kubernetes Controller that automatically creates per-component [Grafana annotations](https://grafana.com/docs/grafana/latest/developers/http_api/annotations/) for deployment events, providing granular timing visibility that traditional CI/CD pipeline annotations cannot offer.
 
 ## Why This Tool?
 
@@ -36,37 +30,11 @@ In traditional CI/CD pipelines, deployment annotations are typically created man
 
 ### Problems with Traditional Approach
 
-#### 1. **Coarse-Grained Timing**
-- **Single timeline** for entire Helm chart deployment
-- **Cannot distinguish** between individual component deployment times
-- **Hides deployment bottlenecks** within multi-component applications
-
-#### 2. **Multi-Component Helm Charts**
-Consider a typical microservices Helm chart with multiple deployments:
-
-```yaml
-# helm-chart/templates/
-├── frontend-deployment.yaml      # Takes 30 seconds to be ready
-├── backend-deployment.yaml       # Takes 2 minutes to be ready
-├── database-deployment.yaml      # Takes 5 minutes to be ready
-├── cache-deployment.yaml         # Takes 10 seconds to be ready
-└── worker-deployment.yaml        # Takes 1 minute to be ready
-```
-
-**Traditional annotation timeline:**
-```
-CI/CD Start ────────────────────────────────────── CI/CD End
-     │                                                  │
-     └── Single annotation covering entire 5+ minutes ──┘
-```
-
-**Problem**: You can't see that the database was the bottleneck while cache deployed quickly.
-
-#### 3. **Independent Component Lifecycles**
-- Components have **different resource requirements**
-- Components have **different startup times**
-- Components may **fail independently**
-- Pipeline annotations **mask individual component behavior**
+- **Coarse-Grained Timing**: Single timeline for entire Helm chart deployment
+- **No Component Visibility**: Cannot distinguish between individual component deployment times
+- **Hidden Bottlenecks**: Masks which specific components are slow to deploy
+- **Independent Lifecycles**: Components have different startup times and may fail independently
+- **Scaling vs Deployment Confusion**: Pipeline annotations don't distinguish between scaling and actual updates
 
 ### This Controller's Approach
 
@@ -116,25 +84,10 @@ Cache:     Started 10:00 → Finished 10:00 (10 seconds)
 4. **SLA Tracking**: Monitor component-level deployment SLAs
 5. **Team Accountability**: Different teams can track their component's deployment performance
 
-### **Example: Microservices Platform**
-
-A typical e-commerce platform with this controller shows:
-
-```grafana
-Cart Service:     ├──┤ (15s) - Lightweight, fast startup
-Product Service:  ├─────┤ (45s) - Medium complexity
-Payment Service:  ├────────────┤ (2m) - Heavy validation startup
-Search Service:   ├──────────────────┤ (3m) - Elasticsearch indexing
-Analytics:        ├─┤ (8s) - Stateless, very fast
-```
-
-**Without this controller**: Single 3-minute annotation hiding that analytics and cart deploy quickly while search is the bottleneck.
-
-**With this controller**: Clear visibility that search service needs optimization while cart and analytics are performing well.
 
 ## Overview
 
-This controller watches `apps/v1` **Deployments** in namespaces labeled with `deployment-annotator=enabled`. When a deployment specification actually changes (not just scaling), it:
+This controller watches `apps/v1` **Deployments** and **Namespaces**. It automatically processes deployments in namespaces labeled with `deployment-annotator=enabled` and provides instant annotation cleanup when labels are removed. When a deployment specification actually changes (not just scaling), it:
 
 1. Uses Kubernetes `generation` and image tag to create a version identifier
 2. Compares current version with previously stored version to detect actual changes
@@ -150,7 +103,8 @@ This controller watches `apps/v1` **Deployments** in namespaces labeled with `de
 - **Smart change detection**: Uses Kubernetes generation + image tag to detect actual deployment changes vs scaling events
 - **Event-driven completion**: Watches ReplicaSet events for instant deployment completion detection (no polling)
 - **KEDA/HPA compatible**: Ignores replica count changes, only tracks real application updates
-- **Namespace filtering**: Only processes deployments in namespaces with `deployment-annotator=enabled` label
+- **Dynamic namespace filtering**: Watches namespace label changes and immediately processes existing deployments
+- **Automatic annotation cleanup**: Removes all annotations when namespace label is removed
 - **Stateless operation**: Survives pod restarts by storing annotation IDs and versions in deployment annotations
 - **Production-ready**: Includes proper RBAC, security contexts, and health checks
 - **Helm deployment**: Complete Helm chart with configurable values
@@ -168,39 +122,49 @@ This controller watches `apps/v1` **Deployments** in namespaces labeled with `de
 
 ```bash
 # Install the controller
-helm install grafana-controller ./helm/deployment-annotator-controller \
+helm install deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
   --set grafana.url=https://your-grafana-instance.com \
   --set-string grafana.apiKey=your-grafana-api-key
 ```
 
-### 2. Create Tracked Namespaces
+### 2. Enable Namespace Tracking
+
+Label your namespace to enable deployment tracking:
 
 ```bash
-# Apply test namespaces
-kubectl apply -f examples/test-namespace.yaml
+# Label your namespace for tracking
+kubectl label namespace your-namespace deployment-annotator=enabled
+
+# Or create a new test namespace with the label
+kubectl create namespace test-grafana-tracking
+kubectl label namespace test-grafana-tracking deployment-annotator=enabled
 ```
 
-### 3. Test with Sample Deployment
+> **Note:** The controller automatically detects namespace label changes. When you add the `deployment-annotator=enabled` label, all existing deployments in that namespace will immediately get start annotations for their current versions. When you remove the label, all deployment annotations will be cleaned up automatically.
+
+### 3. Monitor Deployments
 
 ```bash
-# Deploy a test application
-kubectl apply -f examples/sample-deployment.yaml
+# Check controller logs to see deployment tracking
+kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+
+# Deploy or update any application in the labeled namespace
+kubectl apply -f your-deployment.yaml -n test-grafana-tracking
 
 # Monitor the deployment
-kubectl rollout status deployment/cart-service -n test-grafana-tracking
-
-# Check controller logs
-kubectl logs -l app.kubernetes.io/name=grafana-annotation-controller -f
+kubectl rollout status deployment/your-deployment -n test-grafana-tracking
 ```
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GRAFANA_URL` | Grafana instance URL | Yes |
-| `GRAFANA_API_KEY` | Grafana API key with annotation permissions | Yes |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `GRAFANA_URL` | Grafana instance URL | Yes | - |
+| `GRAFANA_API_KEY` | Grafana API key with annotation permissions | Yes | - |
+| `LOG_LEVEL` | Logging level (info, debug, error) | No | `info` |
+| `LOG_DEVELOPMENT` | Enable development mode logging | No | `false` |
 
 ### Helm Values
 
@@ -212,20 +176,76 @@ grafana:
   url: "https://your-grafana-instance.com"
   apiKey: "your-api-key"
 
+# Controller configuration
+controller:
+  maxConcurrentReconciles: 5
+  log:
+    level: "info"           # info, debug, error
+    development: false      # Enable debug logs and stack traces
+
 # Controller image
 image:
   repository: ghcr.io/perun-engineering/deployment-annotator-for-grafana
   tag: latest
 
+# Single replica to prevent race conditions
+replicaCount: 1
+
 # Resource limits
 resources:
   limits:
-    cpu: 500m
+    cpu: 100m
     memory: 128Mi
   requests:
-    cpu: 100m
+    cpu: 50m
     memory: 64Mi
 ```
+
+## Namespace Management
+
+### Enabling Tracking
+
+When you add the `deployment-annotator=enabled` label to a namespace, the controller immediately:
+
+1. **Discovers existing deployments** in that namespace
+2. **Creates start annotations** for all current deployment versions
+3. **Begins tracking future changes**
+
+```bash
+# Enable tracking for existing namespace with deployments
+kubectl label namespace production deployment-annotator=enabled
+
+# Controller logs will show:
+# "Namespace labeled for tracking, enqueuing deployments" namespace="production" deploymentCount=5
+# "Created deployment start annotation" deployment="api-server" namespace="production"
+# "Created deployment start annotation" deployment="worker" namespace="production"
+```
+
+### Disabling Tracking
+
+When you remove the label, the controller automatically:
+
+1. **Cleans up all annotations** from deployments in that namespace
+2. **Stops tracking future changes**
+3. **Removes deployment-annotator.io/ annotations** completely
+
+```bash
+# Disable tracking and clean up annotations
+kubectl label namespace production deployment-annotator-
+
+# Controller logs will show:
+# "Namespace label removed, cleaning up annotations" namespace="production" deploymentCount=5
+# "Cleaned up deployment annotations" deployment="api-server" namespace="production"
+# "Cleaned up deployment annotations" deployment="worker" namespace="production"
+```
+
+### Annotation Keys
+
+The controller manages these annotation keys on deployments:
+
+- `deployment-annotator.io/start-annotation-id` - Grafana start annotation ID
+- `deployment-annotator.io/end-annotation-id` - Grafana end annotation ID  
+- `deployment-annotator.io/tracked-version` - Current tracked version (generation + image tag)
 
 ## Grafana Configuration
 
@@ -312,7 +332,11 @@ Track specific applications:
 
 ### 1. Controller Registration
 
-The controller uses controller-runtime to watch Deployment resources in namespaces with the `deployment-annotator=enabled` label.
+The controller uses controller-runtime to watch both Deployment and Namespace resources:
+
+- **Deployment events**: Creates annotations when deployment specs change
+- **Namespace events**: Processes existing deployments when labels change  
+- **ReplicaSet events**: Tracks deployment completion status
 
 ### 2. Smart Change Detection
 
@@ -340,11 +364,10 @@ sequenceDiagram
         C->>G: POST /api/annotations/graphite (start)
         G->>C: Return annotation ID
         C->>K8s: Update deployment with annotation ID + version
-    end
-    Note over C: Event-driven completion detection
-    K8s->>C: ReplicaSet ready event
-    C->>C: Check deployment readiness
-    C->>G: POST /api/annotations/graphite (end)
+        Note over C: Event-driven completion detection
+        K8s->>C: ReplicaSet ready event
+        C->>C: Check deployment readiness
+        C->>G: POST /api/annotations/graphite (end)
         G->>C: Return end annotation ID
         C->>G: PATCH /api/annotations/{start-id} (create time region)
     else Same version (scaling/status)
@@ -411,6 +434,94 @@ The controller exposes metrics and logs for monitoring:
 - **Metrics endpoint**: `/metrics` for Prometheus scraping (port 8081)
 - **Structured logging**: JSON logs with appropriate log levels
 - **Controller-runtime metrics**: Built-in metrics for reconciliation performance
+
+## Troubleshooting
+
+### Common Issues
+
+#### Deployments Not Getting Annotations
+
+1. **Check namespace label:**
+   ```bash
+   kubectl get namespace your-namespace --show-labels
+   # Should show: deployment-annotator=enabled
+   ```
+
+2. **Check controller logs:**
+   ```bash
+   kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+   # Look for: "Namespace labeled for tracking, enqueuing deployments"
+   ```
+
+3. **Verify deployment events:**
+   ```bash
+   # Enable debug logging to see all processing
+   helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+     --reuse-values \
+     --set controller.log.level=debug
+   ```
+
+#### Grafana API Errors
+
+1. **Check API key permissions:**
+   - Ensure the API key has `Editor` role or annotation permissions
+   - Test with curl: `curl -H "Authorization: Bearer YOUR_API_KEY" https://your-grafana.com/api/annotations`
+
+2. **Verify Grafana URL:**
+   ```bash
+   kubectl get configmap deployment-annotator-controller-config -o yaml
+   # Check GRAFANA_URL value
+   ```
+
+#### Missing Cleanup After Label Removal
+
+1. **Check for manual annotation removal:**
+   ```bash
+   kubectl get deployment your-deployment -o yaml | grep deployment-annotator.io
+   # Should show no results after label removal
+   ```
+
+2. **Controller restart may be needed:**
+   ```bash
+   kubectl rollout restart deployment deployment-annotator-controller
+   ```
+
+#### High Availability Mode Not Supported
+
+The controller currently does not support leader election and must run with a single replica to prevent race conditions:
+
+- **Race condition risk**: Multiple replicas create duplicate Grafana annotations and conflicting deployment updates
+- **Current limitation**: Controller lacks leader election mechanism
+- **Workaround**: Set `replicaCount: 1` in Helm values (default configuration)
+- **Impact**: Brief downtime during controller pod restart, but deployment tracking resumes automatically
+
+```bash
+# Ensure single replica configuration
+helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+  --reuse-values \
+  --set replicaCount=1
+```
+
+### Logging Configuration
+
+Enable debug logging for detailed troubleshooting:
+
+```bash
+# Enable debug mode
+helm upgrade deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+  --reuse-values \
+  --set controller.log.level=debug \
+  --set controller.log.development=true
+
+# View debug logs
+kubectl logs -l app.kubernetes.io/name=deployment-annotator-controller -f
+```
+
+Debug logs will show:
+- Namespace processing decisions
+- Version comparison logic  
+- Grafana API request/response details
+- Annotation cleanup operations
 
 ## Contributing
 

@@ -15,14 +15,17 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -33,16 +36,16 @@ import (
 
 const (
 	// GrafanaIDAnnotation is the annotation key for storing Grafana annotation ID
-	GrafanaIDAnnotation = "grafana.io/annotation-id"
+	GrafanaIDAnnotation = "deployment-annotator.io/annotation-id"
 
 	// GrafanaStartAnnotation tracks the start annotation ID
-	GrafanaStartAnnotation = "grafana.io/start-annotation-id"
+	GrafanaStartAnnotation = "deployment-annotator.io/start-annotation-id"
 
 	// GrafanaEndAnnotation tracks the end annotation ID
-	GrafanaEndAnnotation = "grafana.io/end-annotation-id"
+	GrafanaEndAnnotation = "deployment-annotator.io/end-annotation-id"
 
 	// GrafanaVersionAnnotation tracks the deployment version (generation + image tag)
-	GrafanaVersionAnnotation = "grafana.io/tracked-version"
+	GrafanaVersionAnnotation = "deployment-annotator.io/tracked-version"
 
 	// HTTPTimeoutSeconds is the timeout for HTTP requests in seconds
 	HTTPTimeoutSeconds = 30
@@ -76,8 +79,41 @@ func sanitizeForLog(input string) string {
 	return sanitized
 }
 
-// computeDeploymentVersion creates a version string from generation and image tag
-func computeDeploymentVersion(deployment *appsv1.Deployment, imageTag string) string {
+// computeDeploymentVersion creates a version string from pod template hash and image tag
+// Uses ReplicaSet's pod template hash to avoid feedback loops from annotation updates
+func (r *DeploymentReconciler) computeDeploymentVersion(
+	ctx context.Context, deployment *appsv1.Deployment, imageTag string,
+) string {
+	// Get the current ReplicaSet to extract pod template hash
+	replicaSets := &appsv1.ReplicaSetList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(deployment.Namespace),
+		client.MatchingLabels(deployment.Spec.Selector.MatchLabels),
+	}
+	if err := r.List(ctx, replicaSets, listOpts...); err != nil {
+		// Fallback to generation if we can't get ReplicaSets
+		return fmt.Sprintf("gen-%d-img-%s", deployment.Generation, imageTag)
+	}
+
+	// Find the current ReplicaSet (the one owned by this deployment with latest revision)
+	var currentRS *appsv1.ReplicaSet
+	for i := range replicaSets.Items {
+		rs := &replicaSets.Items[i]
+		if metav1.IsControlledBy(rs, deployment) {
+			if currentRS == nil || rs.CreationTimestamp.After(currentRS.CreationTimestamp.Time) {
+				currentRS = rs
+			}
+		}
+	}
+
+	if currentRS != nil {
+		// Use the pod template hash from the ReplicaSet
+		if podTemplateHash, exists := currentRS.Labels["pod-template-hash"]; exists {
+			return fmt.Sprintf("hash-%s-img-%s", podTemplateHash, imageTag)
+		}
+	}
+
+	// Fallback to generation if we can't get pod template hash
 	return fmt.Sprintf("gen-%d-img-%s", deployment.Generation, imageTag)
 }
 
@@ -140,7 +176,7 @@ func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Processing deployment",
+	logger.V(1).Info("Processing deployment",
 		"deployment", sanitizeForLog(deployment.Name),
 		"namespace", sanitizeForLog(deployment.Namespace),
 		"generation", deployment.Generation,
@@ -165,13 +201,27 @@ func (r *DeploymentReconciler) handleDeploymentEvent(
 
 	imageRef := deployment.Spec.Template.Spec.Containers[0].Image
 	imageTag := r.extractImageTag(imageRef)
-	currentVersion := computeDeploymentVersion(deployment, imageTag)
+	currentVersion := r.computeDeploymentVersion(ctx, deployment, imageTag)
 	storedVersion := deployment.Annotations[GrafanaVersionAnnotation]
 	startAnnotationID := deployment.Annotations[GrafanaStartAnnotation]
 
-	// Handle new deployment version detection
-	isNewDeploymentVersion := storedVersion == "" || storedVersion != currentVersion
-	if isNewDeploymentVersion {
+	// Handle deployment tracking logic
+	if storedVersion == "" {
+		// First time seeing this deployment - initialize tracking without annotations
+		logger.Info("Initializing tracking for existing deployment",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace),
+			"version", currentVersion)
+		return r.initializeDeploymentTracking(ctx, deployment, currentVersion)
+	}
+
+	if storedVersion != currentVersion {
+		// Real deployment change detected - create Grafana annotations
+		logger.Info("Deployment version changed - creating annotations",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace),
+			"oldVersion", storedVersion,
+			"newVersion", currentVersion)
 		return r.handleNewDeploymentVersion(ctx, deployment, currentVersion, imageRef, imageTag, startAnnotationID)
 	}
 
@@ -187,6 +237,31 @@ func (r *DeploymentReconciler) handleDeploymentEvent(
 	)
 }
 
+// initializeDeploymentTracking marks existing deployments for tracking without creating Grafana annotations
+// This is called during controller startup to establish baseline tracking for existing deployments
+func (r *DeploymentReconciler) initializeDeploymentTracking(
+	ctx context.Context, deployment *appsv1.Deployment, currentVersion string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Just mark the deployment with current version - no Grafana annotations
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to initialize deployment tracking",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	logger.V(1).Info("Deployment tracking initialized (no Grafana annotation created)",
+		"deployment", sanitizeForLog(deployment.Name),
+		"namespace", sanitizeForLog(deployment.Namespace),
+		"version", currentVersion)
+
+	return ctrl.Result{}, nil
+}
+
 // handleNewDeploymentVersion handles the logic for new deployment versions
 func (r *DeploymentReconciler) handleNewDeploymentVersion(
 	ctx context.Context, deployment *appsv1.Deployment, currentVersion, imageRef, imageTag, startAnnotationID string,
@@ -197,24 +272,34 @@ func (r *DeploymentReconciler) handleNewDeploymentVersion(
 		return r.createStartAnnotation(ctx, deployment, currentVersion, imageRef, imageTag)
 	}
 
-	// Version changed but we already have annotations - clear them
-	if err := r.updateDeploymentAnnotations(ctx, deployment, map[string]string{
-		GrafanaStartAnnotation:   "",
-		GrafanaEndAnnotation:     "",
-		GrafanaVersionAnnotation: currentVersion,
-	}); err != nil {
-		logger.Error(err, "Failed to clear annotations for version change",
+	// Version changed and we have existing annotations - update them in place
+	newStartAnnotationID, err := r.createGrafanaAnnotation(
+		deployment.Name, deployment.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create new start annotation for version change",
 			"deployment", sanitizeForLog(deployment.Name),
 			"namespace", sanitizeForLog(deployment.Namespace))
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	logger.Info("Deployment version changed, cleared previous annotations",
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(newStartAnnotationID, 10),
+		GrafanaEndAnnotation:     "", // Clear end annotation as deployment is starting again
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to update annotations for version change",
+			"deployment", sanitizeForLog(deployment.Name),
+			"namespace", sanitizeForLog(deployment.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	logger.Info("Deployment version changed - updated annotations in place",
 		"deployment", sanitizeForLog(deployment.Name),
 		"namespace", sanitizeForLog(deployment.Namespace),
-		"newVersion", currentVersion)
+		"newVersion", currentVersion,
+		"newStartAnnotationID", newStartAnnotationID)
 
-	return ctrl.Result{RequeueAfter: time.Second * RequeueDelaySeconds}, nil
+	return ctrl.Result{}, nil
 }
 
 // createStartAnnotation creates a new start annotation for a deployment
@@ -231,7 +316,7 @@ func (r *DeploymentReconciler) createStartAnnotation(
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	if err := r.updateDeploymentAnnotations(ctx, deployment, map[string]string{
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
 		GrafanaStartAnnotation:   strconv.FormatInt(annotationID, 10),
 		GrafanaVersionAnnotation: currentVersion,
 	}); err != nil {
@@ -285,9 +370,9 @@ func (r *DeploymentReconciler) createEndAnnotation(
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	if err := r.updateDeploymentAnnotation(
-		ctx, deployment, GrafanaEndAnnotation, strconv.FormatInt(annotationID, 10),
-	); err != nil {
+	if err := r.patchDeploymentAnnotations(ctx, deployment, map[string]string{
+		GrafanaEndAnnotation: strconv.FormatInt(annotationID, 10),
+	}); err != nil {
 		logger.Error(err, "Failed to store end annotation ID",
 			"deployment", sanitizeForLog(deployment.Name),
 			"namespace", sanitizeForLog(deployment.Namespace))
@@ -463,34 +548,25 @@ func (r *DeploymentReconciler) updateGrafanaAnnotation(
 	return nil
 }
 
-// updateDeploymentAnnotation updates a deployment's annotation
-func (r *DeploymentReconciler) updateDeploymentAnnotation(
-	ctx context.Context, deployment *appsv1.Deployment, key, value string,
-) error {
-	return r.updateDeploymentAnnotations(ctx, deployment, map[string]string{key: value})
-}
-
-// updateDeploymentAnnotations updates multiple deployment annotations in a single operation
-func (r *DeploymentReconciler) updateDeploymentAnnotations(
+// patchDeploymentAnnotations patches deployment annotations using strategic merge
+func (r *DeploymentReconciler) patchDeploymentAnnotations(
 	ctx context.Context, deployment *appsv1.Deployment, annotations map[string]string,
 ) error {
-	// Get the latest version of the deployment
-	var current appsv1.Deployment
-	if err := r.Get(ctx, client.ObjectKeyFromObject(deployment), &current); err != nil {
-		return fmt.Errorf("failed to get current deployment: %w", err)
+	// Create patch for annotations
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": annotations,
+		},
 	}
 
-	// Update annotations
-	if current.Annotations == nil {
-		current.Annotations = make(map[string]string)
-	}
-	for key, value := range annotations {
-		current.Annotations[key] = value
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
 	}
 
-	// Update the deployment
-	if err := r.Update(ctx, &current); err != nil {
-		return fmt.Errorf("failed to update deployment: %w", err)
+	// Apply the patch
+	if err := r.Patch(ctx, deployment, client.RawPatch(client.Merge.Type(), patchBytes)); err != nil {
+		return fmt.Errorf("failed to patch deployment annotations: %w", err)
 	}
 
 	return nil
@@ -520,18 +596,194 @@ func (r *DeploymentReconciler) mapReplicaSetToDeployment(_ context.Context, obj 
 	return nil
 }
 
+// mapNamespaceToDeployments maps namespace events to deployment reconcile requests
+func (r *DeploymentReconciler) mapNamespaceToDeployments(
+	ctx context.Context, namespace client.Object,
+) []reconcile.Request {
+	logger := log.FromContext(ctx)
+
+	// Get the namespace object
+	ns, ok := namespace.(*corev1.Namespace)
+	if !ok {
+		logger.Error(nil, "Failed to cast object to Namespace")
+		return nil
+	}
+
+	// Check if the namespace has the deployment-annotator label enabled
+	enabled := ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+
+	// List all deployments in this namespace
+	var deployments appsv1.DeploymentList
+	if err := r.List(ctx, &deployments, client.InNamespace(ns.Name)); err != nil {
+		logger.Error(err, "Failed to list deployments in namespace", "namespace", ns.Name)
+		return nil
+	}
+
+	// If label was removed, clean up annotations from all deployments
+	if !enabled {
+		logger.Info("Namespace label removed, cleaning up annotations",
+			"namespace", ns.Name,
+			"deploymentCount", len(deployments.Items))
+
+		for _, deployment := range deployments.Items {
+			if err := r.cleanupDeploymentAnnotations(ctx, &deployment); err != nil {
+				logger.Error(err, "Failed to cleanup annotations",
+					"deployment", deployment.Name,
+					"namespace", deployment.Namespace)
+			}
+		}
+		// Don't enqueue for reconciliation after cleanup
+		return nil
+	}
+
+	// Create reconcile requests for all deployments in the newly labeled namespace
+	var requests []reconcile.Request
+	for _, deployment := range deployments.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: client.ObjectKey{
+				Name:      deployment.Name,
+				Namespace: deployment.Namespace,
+			},
+		})
+	}
+
+	logger.Info("Namespace labeled for tracking, enqueuing deployments",
+		"namespace", ns.Name,
+		"deploymentCount", len(requests))
+
+	return requests
+}
+
+// cleanupDeploymentAnnotations removes all deployment-annotator.io annotations from a deployment
+func (r *DeploymentReconciler) cleanupDeploymentAnnotations(
+	ctx context.Context, deployment *appsv1.Deployment,
+) error {
+	logger := log.FromContext(ctx)
+
+	// Check if deployment has any of our annotations
+	hasAnnotations := false
+	annotationsToRemove := map[string]string{
+		GrafanaStartAnnotation:   "",
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: "",
+	}
+
+	if deployment.Annotations != nil {
+		for key := range annotationsToRemove {
+			if _, exists := deployment.Annotations[key]; exists {
+				hasAnnotations = true
+				break
+			}
+		}
+	}
+
+	// Nothing to clean up
+	if !hasAnnotations {
+		return nil
+	}
+
+	// Remove our annotations by setting them to empty (which removes them)
+	if err := r.patchDeploymentAnnotations(ctx, deployment, annotationsToRemove); err != nil {
+		return err
+	}
+
+	logger.Info("Cleaned up deployment annotations",
+		"deployment", sanitizeForLog(deployment.Name),
+		"namespace", sanitizeForLog(deployment.Namespace))
+
+	return nil
+}
+
+// specChangedPredicate only triggers on spec changes, not annotation changes
+// This prevents feedback loops from our own annotation updates
+func specChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldDeployment, ok := e.ObjectOld.(*appsv1.Deployment)
+			if !ok {
+				return false
+			}
+			newDeployment, ok := e.ObjectNew.(*appsv1.Deployment)
+			if !ok {
+				return false
+			}
+
+			// Only trigger if the spec actually changed
+			oldSpecBytes, _ := json.Marshal(oldDeployment.Spec)
+			newSpecBytes, _ := json.Marshal(newDeployment.Spec)
+
+			return !bytes.Equal(oldSpecBytes, newSpecBytes)
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Always process new deployments
+			return true
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Always process deletions
+			return true
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			// Process generic events
+			return true
+		},
+	}
+}
+
+// namespaceLabelChangedPredicate only triggers when deployment-annotator label changes
+func namespaceLabelChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			ns, ok := e.Object.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+			// Trigger if namespace is created with deployment-annotator=enabled
+			return ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNs, ok := e.ObjectOld.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+			newNs, ok := e.ObjectNew.(*corev1.Namespace)
+			if !ok {
+				return false
+			}
+
+			// Get old and new label values
+			oldEnabled := oldNs.Labels != nil && oldNs.Labels["deployment-annotator"] == "enabled"
+			newEnabled := newNs.Labels != nil && newNs.Labels["deployment-annotator"] == "enabled"
+
+			// Trigger if the label changed in either direction (enabled to disabled or disabled to enabled)
+			return oldEnabled != newEnabled
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Don't care about namespace deletions
+			return false
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			// Don't care about generic events
+			return false
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager
 func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&appsv1.Deployment{}).
+		For(&appsv1.Deployment{}, builder.WithPredicates(specChangedPredicate())).
 		Watches(
 			&appsv1.ReplicaSet{},
 			handler.EnqueueRequestsFromMapFunc(r.mapReplicaSetToDeployment),
 		).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.mapNamespaceToDeployments),
+			builder.WithPredicates(namespaceLabelChangedPredicate()),
+		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultMaxConcurrentReconciles,
 		}).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
 
@@ -546,7 +798,23 @@ func main() {
 	}
 
 	// Setup logging - use zap directly to avoid stack overflow
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	devMode := getEnvBool("LOG_DEVELOPMENT", false)
+	logLevel := getEnvString("LOG_LEVEL", "info")
+
+	var zapOpts []zap.Opts
+	zapOpts = append(zapOpts, zap.UseDevMode(devMode))
+
+	// Configure log level
+	switch logLevel {
+	case "debug":
+		zapOpts = append(zapOpts, zap.Level(zapcore.DebugLevel))
+	case "error":
+		zapOpts = append(zapOpts, zap.Level(zapcore.ErrorLevel))
+	default: // "info"
+		zapOpts = append(zapOpts, zap.Level(zapcore.InfoLevel))
+	}
+
+	ctrl.SetLogger(zap.New(zapOpts...))
 	logger := ctrl.Log.WithName("main")
 
 	// Print version information
@@ -625,4 +893,22 @@ func main() {
 		logger.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+}
+
+// getEnvString gets an environment variable as string with default value
+func getEnvString(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// getEnvBool gets an environment variable as boolean with default value
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

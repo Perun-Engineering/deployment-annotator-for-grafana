@@ -201,23 +201,23 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Update the default image tag in values.yaml to match the release version
-          sed -i "s/tag: \"latest\"/tag: \"$RELEASE_VERSION\"/" helm/deployment-annotator/values.yaml
+          sed -i "s/tag: \"latest\"/tag: \"$RELEASE_VERSION\"/" helm/deployment-annotator-controller/values.yaml
 
           # Update appVersion in Chart.yaml to match the release version
-          sed -i "s/appVersion: \"[^\"]*\"/appVersion: \"$RELEASE_VERSION\"/" helm/deployment-annotator/Chart.yaml
+          sed -i "s/appVersion: \"[^\"]*\"/appVersion: \"$RELEASE_VERSION\"/" helm/deployment-annotator-controller/Chart.yaml
 
           # Verify the changes
           echo "Updated values.yaml image tag:"
-          grep -A 3 "image:" helm/deployment-annotator/values.yaml
+          grep -A 3 "image:" helm/deployment-annotator-controller/values.yaml
           echo ""
           echo "Updated Chart.yaml appVersion:"
-          grep "appVersion:" helm/deployment-annotator/Chart.yaml
+          grep "appVersion:" helm/deployment-annotator-controller/Chart.yaml
 
       - name: Verify chart version
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          CHART_VERSION=$(grep '^version:' helm/deployment-annotator/Chart.yaml | cut -d' ' -f2)
+          CHART_VERSION=$(grep '^version:' helm/deployment-annotator-controller/Chart.yaml | cut -d' ' -f2)
           if [ "$CHART_VERSION" != "$RELEASE_VERSION" ]; then
             echo "Chart version ($CHART_VERSION) doesn't match release version ($RELEASE_VERSION)"
             echo "This should have been updated by semantic-release"
@@ -226,13 +226,13 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package helm/deployment-annotator --destination .
+          helm package helm/deployment-annotator-controller --destination .
 
       - name: Push Helm chart to OCI registry
         env:
           CHART_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          helm push deployment-annotator-${CHART_VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm
+          helm push deployment-annotator-controller-${CHART_VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm
 
       - name: Upload Helm chart to release
         env:
@@ -241,7 +241,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "$TAG_NAME" \
-            deployment-annotator-${CHART_VERSION}.tgz --clobber
+            deployment-annotator-controller-${CHART_VERSION}.tgz --clobber
 
   # Security scan of released image
   security-scan:
@@ -336,13 +336,13 @@ jobs:
           echo "### Artifacts Published:"
           echo "- 🐳 **Multi-Arch Container Images**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
           echo "  - Platforms: linux/amd64, linux/arm64"
-          echo "- 📦 **Helm Chart**: oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm/deployment-annotator"
+          echo "- 📦 **Helm Chart**: oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm/deployment-annotator-controller"
           echo "- 🔒 **SBOM**: Software Bill of Materials for security compliance"
           echo ""
           echo "### Installation Commands:"
           echo '```bash'
           echo "# Install via Helm (OCI)"
-          echo "helm install grafana-controller oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm/deployment-annotator \\"
+          echo "helm install deployment-annotator-controller oci://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/helm/deployment-annotator-controller \\"
           echo "  --version ${{ steps.version.outputs.version }} \\"
           echo "  --set grafana.url=https://your-grafana.com \\"
           echo "  --set grafana.apiKey=your-api-key"
