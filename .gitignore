@@ -51,3 +51,4 @@ push-to-github.sh
 # Claude Code
 .claude
 CLAUDE.md
+deployment-annotator
