@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.3.0](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.2.2...v1.3.0) (2025-08-04)
+
+
+### 🎯 Features
+
+* **grafana:** add connection test and refactor client ([d806089](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/d8060896667823964c01b585010ebea91d17bf7c))
+
 ## [1.2.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.2.1...v1.2.2) (2025-06-27)
 
 
