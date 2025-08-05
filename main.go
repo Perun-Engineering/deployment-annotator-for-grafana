@@ -155,9 +155,22 @@ func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var deployment appsv1.Deployment
 	if err := r.Get(ctx, req.NamespacedName, &deployment); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			// Deployment was deleted - handle deletion annotation
-			logger.Info("Deployment deleted", "deployment", req.Name, "namespace", req.Namespace)
-			return r.handleDeploymentDeletion(ctx, req.Name, req.Namespace)
+			// Deployment was deleted - check if namespace is labeled before handling deletion
+			namespace, err := r.K8sClient.CoreV1().Namespaces().Get(ctx, req.Namespace, metav1.GetOptions{})
+			if err != nil {
+				logger.Error(err, "Failed to get namespace for deletion check", "namespace", req.Namespace)
+				return ctrl.Result{}, nil // Don't requeue on namespace fetch errors for deletions
+			}
+
+			// Only handle deletion if namespace is labeled for tracking
+			if namespace.Labels["deployment-annotator"] == "enabled" {
+				logger.Info("Deployment deleted", "deployment", req.Name, "namespace", req.Namespace)
+				return r.handleDeploymentDeletion(ctx, req.Name, req.Namespace)
+			}
+
+			// Namespace not labeled - ignore deletion
+			logger.V(1).Info("Ignoring deletion in unlabeled namespace", "deployment", req.Name, "namespace", req.Namespace)
+			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Failed to get deployment")
 		return ctrl.Result{}, err
