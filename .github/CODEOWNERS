@@ -1,20 +1,20 @@
 # Global owners
-* @perun-engineering
+* @sirantd
 
 # Go code
-*.go @perun-engineering
+*.go @sirantd
 
 # Kubernetes manifests
-helm/ @perun-engineering
-examples/ @perun-engineering
+helm/ @sirantd
+examples/ @sirantd
 
 # CI/CD
-.github/ @perun-engineering
+.github/ @sirantd
 
 # Documentation
-*.md @perun-engineering
-docs/ @perun-engineering
+*.md @sirantd
+docs/ @sirantd
 
 # Security-sensitive files
-.github/workflows/security.yml @perun-engineering
-Dockerfile @perun-engineering
+.github/workflows/security.yml @sirantd
+Dockerfile @sirantd

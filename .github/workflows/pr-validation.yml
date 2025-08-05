@@ -34,6 +34,7 @@ jobs:
           ci
           chore
           revert
+          deps
         # Configure which scopes are allowed (optional)
         scopes: |
           webhook
@@ -43,6 +44,11 @@ jobs:
           security
           deps
           release
+          docker
+          k8s
+          grafana
+          tests
+          controller
         # Require a scope to be provided
         requireScope: false
         # Disable validation of the subject's case
