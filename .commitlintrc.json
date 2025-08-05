@@ -15,7 +15,8 @@
         "build",
         "ci",
         "chore",
-        "revert"
+        "revert",
+        "deps"
       ]
     ],
     "scope-enum": [

@@ -52,6 +52,10 @@
             "release": false
           },
           {
+            "type": "deps",
+            "release": "patch"
+          },
+          {
             "scope": "no-release",
             "release": false
           },
@@ -115,6 +119,10 @@
               "type": "chore",
               "section": "🔧 Maintenance",
               "hidden": true
+            },
+            {
+              "type": "deps",
+              "section": "📦 Dependencies"
             }
           ]
         }

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.3.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.0...v1.3.1) (2025-08-05)
+
+
+### 🐛 Bug Fixes
+
+* add namespace label check for deployment deletions ([24685ef](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/24685ef1a1e82f7b1fecae16803c246248eda93c))
+
 ## [1.3.0](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.2.2...v1.3.0) (2025-08-04)
 
 
