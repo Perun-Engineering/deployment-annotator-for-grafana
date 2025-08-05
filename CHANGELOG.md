@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.3.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.1...v1.3.2) (2025-08-05)
+
+
+### 📦 Dependencies
+
+* **deps:** bump k8s.io/apimachinery from 0.33.2 to 0.33.3 ([3cf6476](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/3cf647687d57cc526920eb27cd2451fbb1a50d34))
+* **deps:** bump k8s.io/client-go from 0.33.2 to 0.33.3 ([9e6dc43](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/9e6dc43347f981f975930e701db944ad467d1368))
+
 ## [1.3.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.0...v1.3.1) (2025-08-05)
 
 
