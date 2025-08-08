@@ -87,25 +87,25 @@ Cache:     Started 10:00 → Finished 10:00 (10 seconds)
 
 ## Overview
 
-This controller watches `apps/v1` **Deployments** and **Namespaces**. It automatically processes deployments in namespaces labeled with `deployment-annotator=enabled` and provides instant annotation cleanup when labels are removed. When a deployment specification actually changes (not just scaling), it:
+This controller watches `apps/v1` **Deployments**, **StatefulSets**, **DaemonSets** and **Namespaces**. It automatically processes these workloads in namespaces labeled with `deployment-annotator=enabled` and provides instant annotation cleanup when labels are removed. When a workload specification actually changes (not just scaling), it:
 
 1. Uses Kubernetes `generation` and image tag to create a version identifier
 2. Compares current version with previously stored version to detect actual changes
-3. Creates Grafana annotations only for real deployment changes, not scaling events
-4. Stores annotation IDs and version in deployment annotations for persistence
-5. Monitors the deployment until it becomes available
-6. Updates the Grafana annotation to mark the deployment completion
+3. Creates Grafana annotations only for real changes, not scaling/rescheduling events
+4. Stores annotation IDs and version in workload annotations for persistence
+5. Monitors the workload until it becomes available/ready
+6. Updates the Grafana annotation to mark the completion
 
 ## Features
 
-- **Per-component granular tracking**: Individual deployment timelines instead of single CI/CD pipeline annotation
+- **Per-component granular tracking**: Individual workload timelines instead of single CI/CD pipeline annotation
 - **Multi-component Helm chart support**: See exact timing for each deployment within complex charts
-- **Smart change detection**: Uses Kubernetes generation + image tag to detect actual deployment changes vs scaling events
-- **Event-driven completion**: Watches ReplicaSet events for instant deployment completion detection (no polling)
+- **Smart change detection**: Uses Kubernetes generation + image tag to detect actual changes vs scaling/rescheduling events
+- **Event-driven completion**: Watches ReplicaSet events for Deployments and status updates for StatefulSets/DaemonSets (no polling)
 - **KEDA/HPA compatible**: Ignores replica count changes, only tracks real application updates
-- **Dynamic namespace filtering**: Watches namespace label changes and immediately processes existing deployments
+- **Dynamic namespace filtering**: Watches namespace label changes and immediately processes existing workloads
 - **Automatic annotation cleanup**: Removes all annotations when namespace label is removed
-- **Stateless operation**: Survives pod restarts by storing annotation IDs and versions in deployment annotations
+- **Stateless operation**: Survives pod restarts by storing annotation IDs and versions in workload annotations
 - **Production-ready**: Includes proper RBAC, security contexts, and health checks
 - **Helm deployment**: Complete Helm chart with configurable values
 
@@ -241,7 +241,7 @@ kubectl label namespace production deployment-annotator-
 
 ### Annotation Keys
 
-The controller manages these annotation keys on deployments:
+The controller manages these annotation keys on workloads:
 
 - `deployment-annotator.io/start-annotation-id` - Grafana start annotation ID
 - `deployment-annotator.io/end-annotation-id` - Grafana end annotation ID  
@@ -332,11 +332,12 @@ Track specific applications:
 
 ### 1. Controller Registration
 
-The controller uses controller-runtime to watch both Deployment and Namespace resources:
+The controller uses controller-runtime to watch multiple resources:
 
-- **Deployment events**: Creates annotations when deployment specs change
-- **Namespace events**: Processes existing deployments when labels change  
-- **ReplicaSet events**: Tracks deployment completion status
+- **Deployment events**: Creates annotations when deployment specs change; tracks completion via ReplicaSets
+- **StatefulSet events**: Creates annotations when StatefulSet specs change; tracks readiness via status
+- **DaemonSet events**: Creates annotations when DaemonSet specs change; tracks readiness via status
+- **Namespace events**: Processes existing workloads when labels change
 
 ### 2. Smart Change Detection
 
