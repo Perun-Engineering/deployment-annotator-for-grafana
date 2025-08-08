@@ -79,6 +79,11 @@ controller:
     level: "info"
     # Development mode (enables debug logs and stack traces)
     development: false
+  # Which workload kinds to watch
+  watch:
+    deployments: true
+    statefulSets: true
+    daemonSets: true
 
 # RBAC configuration
 rbac:

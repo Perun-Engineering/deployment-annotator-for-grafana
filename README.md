@@ -103,6 +103,7 @@ This controller watches `apps/v1` **Deployments**, **StatefulSets**, **DaemonSet
 - **Smart change detection**: Uses Kubernetes generation + image tag to detect actual changes vs scaling/rescheduling events
 - **Event-driven completion**: Watches ReplicaSet events for Deployments and status updates for StatefulSets/DaemonSets (no polling)
 - **KEDA/HPA compatible**: Ignores replica count changes, only tracks real application updates
+- **Selective workload watching**: Configurable watching of Deployments, StatefulSets, and DaemonSets independently
 - **Dynamic namespace filtering**: Watches namespace label changes and immediately processes existing workloads
 - **Automatic annotation cleanup**: Removes all annotations when namespace label is removed
 - **Stateless operation**: Survives pod restarts by storing annotation IDs and versions in workload annotations
@@ -165,6 +166,9 @@ kubectl rollout status deployment/your-deployment -n test-grafana-tracking
 | `GRAFANA_API_KEY` | Grafana API key with annotation permissions | Yes | - |
 | `LOG_LEVEL` | Logging level (info, debug, error) | No | `info` |
 | `LOG_DEVELOPMENT` | Enable development mode logging | No | `false` |
+| `WATCH_DEPLOYMENTS` | Enable watching of Deployment resources | No | `true` |
+| `WATCH_STATEFULSETS` | Enable watching of StatefulSet resources | No | `true` |
+| `WATCH_DAEMONSETS` | Enable watching of DaemonSet resources | No | `true` |
 
 ### Helm Values
 
@@ -182,6 +186,11 @@ controller:
   log:
     level: "info"           # info, debug, error
     development: false      # Enable debug logs and stack traces
+  # Which workload kinds to watch
+  watch:
+    deployments: true       # Watch Deployment resources
+    statefulSets: true      # Watch StatefulSet resources
+    daemonSets: true        # Watch DaemonSet resources
 
 # Controller image
 image:
@@ -200,6 +209,76 @@ resources:
     cpu: 50m
     memory: 64Mi
 ```
+
+### Selective Workload Watching
+
+You can configure which types of Kubernetes workloads the controller should watch. This is useful when you want to:
+
+- **Reduce resource usage**: Only watch the workload types you actually use
+- **Avoid noise**: Skip workload types that don't need deployment tracking
+- **Gradual rollout**: Enable tracking for one workload type at a time
+
+#### Configuration Options
+
+**Via Helm values:**
+```yaml
+controller:
+  watch:
+    deployments: true     # Watch Deployment resources (default: true)
+    statefulSets: false   # Skip StatefulSet resources 
+    daemonSets: true      # Watch DaemonSet resources (default: true)
+```
+
+**Via environment variables:**
+```bash
+# Enable only Deployment watching
+helm install deployment-annotator-controller oci://ghcr.io/perun-engineering/deployment-annotator-for-grafana/helm/deployment-annotator-controller \
+  --set grafana.url=https://your-grafana-instance.com \
+  --set-string grafana.apiKey=your-grafana-api-key \
+  --set controller.watch.deployments=true \
+  --set controller.watch.statefulSets=false \
+  --set controller.watch.daemonSets=false
+```
+
+#### Controller Behavior
+
+When a workload type is disabled:
+- The controller will **not** set up a reconciler for that resource type
+- Existing annotations for that workload type remain untouched
+- Controller logs will show: `"StatefulSet watching disabled via env"`
+- No resources are consumed watching disabled workload types
+
+#### Common Use Cases
+
+**Deployments Only:**
+```yaml
+controller:
+  watch:
+    deployments: true
+    statefulSets: false
+    daemonSets: false
+```
+*Use when you only deploy stateless applications*
+
+**StatefulSets Only:**
+```yaml
+controller:
+  watch:
+    deployments: false
+    statefulSets: true
+    daemonSets: false
+```
+*Use for database-heavy environments*
+
+**All Workloads (Default):**
+```yaml
+controller:
+  watch:
+    deployments: true
+    statefulSets: true
+    daemonSets: true
+```
+*Use for comprehensive deployment tracking*
 
 ## Namespace Management
 
