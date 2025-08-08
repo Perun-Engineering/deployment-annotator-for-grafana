@@ -1432,41 +1432,54 @@ func main() {
 		HTTPClient: &http.Client{Timeout: HTTPTimeoutSeconds * time.Second},
 	}
 
-	// Setup reconciler for Deployments
-	reconciler := &DeploymentReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		K8sClient: k8sClient,
-		GClient:   gClient,
+	// Read watch toggles from env (default true)
+	watchDeployments := getEnvBool("WATCH_DEPLOYMENTS", true)
+	watchStatefulSets := getEnvBool("WATCH_STATEFULSETS", true)
+	watchDaemonSets := getEnvBool("WATCH_DAEMONSETS", true)
+
+	if watchDeployments {
+		reconciler := &DeploymentReconciler{
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			K8sClient: k8sClient,
+			GClient:   gClient,
+		}
+		if err = reconciler.SetupWithManager(mgr); err != nil {
+			logger.Error(err, "Failed to setup Deployment controller")
+			os.Exit(1)
+		}
+	} else {
+		logger.Info("Deployment watching disabled via env")
 	}
 
-	if err = reconciler.SetupWithManager(mgr); err != nil {
-		logger.Error(err, "Failed to setup controller")
-		os.Exit(1)
+	if watchStatefulSets {
+		stsReconciler := &StatefulSetReconciler{
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			K8sClient: k8sClient,
+			GClient:   gClient,
+		}
+		if err = stsReconciler.SetupWithManager(mgr); err != nil {
+			logger.Error(err, "Failed to setup StatefulSet controller")
+			os.Exit(1)
+		}
+	} else {
+		logger.Info("StatefulSet watching disabled via env")
 	}
 
-	// Setup reconciler for StatefulSets
-	stsReconciler := &StatefulSetReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		K8sClient: k8sClient,
-		GClient:   gClient,
-	}
-	if err = stsReconciler.SetupWithManager(mgr); err != nil {
-		logger.Error(err, "Failed to setup StatefulSet controller")
-		os.Exit(1)
-	}
-
-	// Setup reconciler for DaemonSets
-	dsReconciler := &DaemonSetReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		K8sClient: k8sClient,
-		GClient:   gClient,
-	}
-	if err = dsReconciler.SetupWithManager(mgr); err != nil {
-		logger.Error(err, "Failed to setup DaemonSet controller")
-		os.Exit(1)
+	if watchDaemonSets {
+		dsReconciler := &DaemonSetReconciler{
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			K8sClient: k8sClient,
+			GClient:   gClient,
+		}
+		if err = dsReconciler.SetupWithManager(mgr); err != nil {
+			logger.Error(err, "Failed to setup DaemonSet controller")
+			os.Exit(1)
+		}
+	} else {
+		logger.Info("DaemonSet watching disabled via env")
 	}
 
 	// Add health checks

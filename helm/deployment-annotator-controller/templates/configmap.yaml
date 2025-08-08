@@ -6,3 +6,6 @@ metadata:
     {{- include "deployment-annotator-controller.labels" . | nindent 4 }}
 data:
   GRAFANA_URL: {{ .Values.grafana.url | quote }}
+  WATCH_DEPLOYMENTS: {{ .Values.controller.watch.deployments | quote }}
+  WATCH_STATEFULSETS: {{ .Values.controller.watch.statefulSets | quote }}
+  WATCH_DAEMONSETS: {{ .Values.controller.watch.daemonSets | quote }}

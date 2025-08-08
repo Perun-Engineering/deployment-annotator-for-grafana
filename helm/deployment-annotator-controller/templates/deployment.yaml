@@ -60,6 +60,21 @@ spec:
                 configMapKeyRef:
                   name: {{ include "deployment-annotator-controller.fullname" . }}-config
                   key: GRAFANA_URL
+            - name: WATCH_DEPLOYMENTS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "deployment-annotator-controller.fullname" . }}-config
+                  key: WATCH_DEPLOYMENTS
+            - name: WATCH_STATEFULSETS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "deployment-annotator-controller.fullname" . }}-config
+                  key: WATCH_STATEFULSETS
+            - name: WATCH_DAEMONSETS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "deployment-annotator-controller.fullname" . }}-config
+                  key: WATCH_DAEMONSETS
             - name: GRAFANA_API_KEY
               valueFrom:
                 secretKeyRef:
