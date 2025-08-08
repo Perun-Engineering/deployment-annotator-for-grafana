@@ -800,6 +800,934 @@ func (r *DeploymentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// =====================
+// StatefulSet Reconciler
+// =====================
+
+// StatefulSetReconciler reconciles StatefulSet objects
+type StatefulSetReconciler struct {
+	client.Client
+	Scheme     *runtime.Scheme
+	K8sClient  kubernetes.Interface
+	GrafanaURL string
+	GrafanaKey string
+	HTTPClient *http.Client
+}
+
+// computeStatefulSetVersion creates a version string for StatefulSet from generation + image tag
+func (r *StatefulSetReconciler) computeStatefulSetVersion(
+	_ context.Context,
+	sts *appsv1.StatefulSet, imageTag string) string {
+	return fmt.Sprintf("gen-%d-img-%s", sts.Generation, imageTag)
+}
+
+// Reconcile handles StatefulSet events and creates/updates Grafana annotations
+func (r *StatefulSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	var sts appsv1.StatefulSet
+	if err := r.Get(ctx, req.NamespacedName, &sts); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			namespace, nerr := r.K8sClient.CoreV1().Namespaces().Get(ctx, req.Namespace, metav1.GetOptions{})
+			if nerr != nil {
+				logger.Error(nerr, "Failed to get namespace for deletion check", "namespace", req.Namespace)
+				return ctrl.Result{}, nil
+			}
+			if namespace.Labels["deployment-annotator"] == "enabled" {
+				logger.Info("StatefulSet deleted", "statefulset", req.Name, "namespace", req.Namespace)
+				return r.handleStatefulSetDeletion(ctx, req.Name, req.Namespace)
+			}
+			logger.V(1).Info("Ignoring deletion in unlabeled namespace", "statefulset", req.Name, "namespace", req.Namespace)
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get StatefulSet")
+		return ctrl.Result{}, err
+	}
+
+	namespace, err := r.K8sClient.CoreV1().Namespaces().Get(ctx, sts.Namespace, metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "Failed to get namespace", "namespace", sts.Namespace)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	}
+	if namespace.Labels == nil || namespace.Labels["deployment-annotator"] != "enabled" {
+		return ctrl.Result{}, nil
+	}
+
+	logger.V(1).Info("Processing StatefulSet",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"generation", sts.Generation,
+		"observedGeneration", sts.Status.ObservedGeneration)
+
+	return r.handleStatefulSetEvent(ctx, &sts)
+}
+
+func (r *StatefulSetReconciler) handleStatefulSetEvent(
+	ctx context.Context, sts *appsv1.StatefulSet,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if len(sts.Spec.Template.Spec.Containers) == 0 {
+		logger.Info("No containers found in StatefulSet",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{}, nil
+	}
+
+	imageRef := sts.Spec.Template.Spec.Containers[0].Image
+	imageTag := r.extractImageTag(imageRef)
+	currentVersion := r.computeStatefulSetVersion(ctx, sts, imageTag)
+	storedVersion := sts.Annotations[GrafanaVersionAnnotation]
+	startAnnotationID := sts.Annotations[GrafanaStartAnnotation]
+
+	if storedVersion == "" {
+		logger.Info("Initializing tracking for existing StatefulSet",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace),
+			"version", currentVersion)
+		return r.initializeStatefulSetTracking(ctx, sts, currentVersion)
+	}
+
+	if storedVersion != currentVersion {
+		logger.Info("StatefulSet version changed - creating annotations",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace),
+			"oldVersion", storedVersion,
+			"newVersion", currentVersion)
+		return r.handleNewStatefulSetVersion(ctx, sts, currentVersion, imageRef, imageTag, startAnnotationID)
+	}
+
+	logger.V(1).Info("StatefulSet event without version changes (likely scaling)",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"version", currentVersion)
+
+	return r.handleStatefulSetCompletion(ctx, sts, currentVersion, imageRef, imageTag, storedVersion, startAnnotationID)
+}
+
+func (r *StatefulSetReconciler) initializeStatefulSetTracking(
+	ctx context.Context, sts *appsv1.StatefulSet, currentVersion string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if err := r.patchStatefulSetAnnotations(ctx, sts, map[string]string{
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to initialize StatefulSet tracking",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	logger.V(1).Info("StatefulSet tracking initialized (no Grafana annotation created)",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"version", currentVersion)
+	return ctrl.Result{}, nil
+}
+
+func (r *StatefulSetReconciler) handleNewStatefulSetVersion(
+	ctx context.Context, sts *appsv1.StatefulSet, currentVersion, imageRef, imageTag, startAnnotationID string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if startAnnotationID == "" {
+		return r.createStatefulSetStartAnnotation(ctx, sts, currentVersion, imageRef, imageTag)
+	}
+
+	newStartAnnotationID, err := r.createGrafanaAnnotation(sts.Name, sts.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create new start annotation for StatefulSet version change",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	if err := r.patchStatefulSetAnnotations(ctx, sts, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(newStartAnnotationID, 10),
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to update annotations for StatefulSet version change",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	logger.Info("StatefulSet version changed - updated annotations in place",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"newVersion", currentVersion,
+		"newStartAnnotationID", newStartAnnotationID)
+	return ctrl.Result{}, nil
+}
+
+func (r *StatefulSetReconciler) createStatefulSetStartAnnotation(
+	ctx context.Context, sts *appsv1.StatefulSet, currentVersion, imageRef, imageTag string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	annotationID, err := r.createGrafanaAnnotation(sts.Name, sts.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create start annotation",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+
+	if err := r.patchStatefulSetAnnotations(ctx, sts, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(annotationID, 10),
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to store start annotation ID and version",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	logger.Info("Created StatefulSet start annotation",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"annotationID", annotationID,
+		"version", currentVersion)
+	return ctrl.Result{}, nil
+}
+
+func (r *StatefulSetReconciler) handleStatefulSetCompletion(
+	ctx context.Context, sts *appsv1.StatefulSet,
+	currentVersion, imageRef, imageTag, storedVersion, startAnnotationID string,
+) (ctrl.Result, error) {
+	if !r.isStatefulSetReady(sts) || storedVersion != currentVersion {
+		return ctrl.Result{}, nil
+	}
+	endAnnotationID := sts.Annotations[GrafanaEndAnnotation]
+	if endAnnotationID != "" || startAnnotationID == "" {
+		return ctrl.Result{}, nil
+	}
+	return r.createStatefulSetEndAnnotation(ctx, sts, imageRef, imageTag, startAnnotationID)
+}
+
+func (r *StatefulSetReconciler) createStatefulSetEndAnnotation(
+	ctx context.Context, sts *appsv1.StatefulSet, imageRef, imageTag, startAnnotationID string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	annotationID, err := r.createGrafanaAnnotation(sts.Name, sts.Namespace, imageTag, imageRef, "completed")
+	if err != nil {
+		logger.Error(err, "Failed to create end annotation",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if err := r.patchStatefulSetAnnotations(ctx, sts, map[string]string{
+		GrafanaEndAnnotation: strconv.FormatInt(annotationID, 10),
+	}); err != nil {
+		logger.Error(err, "Failed to store end annotation ID",
+			"statefulset", sanitizeForLog(sts.Name),
+			"namespace", sanitizeForLog(sts.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if startID, err := strconv.ParseInt(startAnnotationID, 10, 64); err == nil {
+		if err := r.updateGrafanaAnnotation(startID, sts.Name, sts.Namespace, imageTag); err != nil {
+			logger.Error(err, "Failed to update start annotation to region", "startAnnotationID", startID)
+		}
+	}
+	logger.Info("StatefulSet completed",
+		"statefulset", sanitizeForLog(sts.Name),
+		"namespace", sanitizeForLog(sts.Namespace),
+		"endAnnotationID", annotationID)
+	return ctrl.Result{}, nil
+}
+
+func (r *StatefulSetReconciler) handleStatefulSetDeletion(
+	ctx context.Context, name, namespace string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if _, err := r.createGrafanaAnnotation(name, namespace, "", "", "deleted"); err != nil {
+		logger.Error(err, "Failed to create deletion annotation",
+			"statefulset", sanitizeForLog(name),
+			"namespace", sanitizeForLog(namespace))
+		return ctrl.Result{}, err
+	}
+	logger.Info("Created StatefulSet deletion annotation",
+		"statefulset", sanitizeForLog(name),
+		"namespace", sanitizeForLog(namespace))
+	return ctrl.Result{}, nil
+}
+
+func (r *StatefulSetReconciler) isStatefulSetReady(sts *appsv1.StatefulSet) bool {
+	return sts.Status.ReadyReplicas > 0 &&
+		sts.Status.ReadyReplicas == sts.Status.Replicas &&
+		sts.Status.ObservedGeneration == sts.Generation
+}
+
+func (r *StatefulSetReconciler) extractImageTag(imageRef string) string {
+	parts := strings.Split(imageRef, ":")
+	if len(parts) < ImageTagSeparatorCount {
+		return "latest"
+	}
+	return parts[len(parts)-1]
+}
+
+// createGrafanaAnnotation creates a new annotation in Grafana
+func (r *StatefulSetReconciler) createGrafanaAnnotation(
+	statefulSetName, namespace, imageTag, imageRef, eventType string,
+) (int64, error) {
+	sanitizedName := sanitizeForLog(statefulSetName)
+	sanitizedNamespace := sanitizeForLog(namespace)
+	sanitizedTag := sanitizeForLog(imageTag)
+	sanitizedRef := sanitizeForLog(imageRef)
+
+	var what, data string
+	switch eventType {
+	case "started":
+		what = fmt.Sprintf("deploy-start:%s", sanitizedName)
+		data = fmt.Sprintf("Started deployment %s", sanitizedRef)
+	case "completed":
+		what = fmt.Sprintf("deploy-end:%s", sanitizedName)
+		data = fmt.Sprintf("Completed deployment %s", sanitizedRef)
+	case "deleted":
+		what = fmt.Sprintf("deploy-delete:%s", sanitizedName)
+		data = fmt.Sprintf("Deleted deployment %s", sanitizedName)
+	default:
+		what = fmt.Sprintf("deploy:%s", sanitizedName)
+		data = fmt.Sprintf("Deployment event: %s", eventType)
+	}
+
+	annotation := GrafanaAnnotation{
+		What: what,
+		Tags: []string{"deploy", sanitizedNamespace, sanitizedName, sanitizedTag, eventType},
+		Data: data,
+		When: time.Now().Unix(),
+	}
+	jsonData, err := json.Marshal(annotation)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal annotation: %w", err)
+	}
+	url := fmt.Sprintf("%s/api/annotations/graphite", r.GrafanaURL)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.GrafanaKey))
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			return 0, fmt.Errorf("grafana API returned status %d and failed to read response body: %w", resp.StatusCode, rerr)
+		}
+		return 0, fmt.Errorf("grafana API returned status %d: %s", resp.StatusCode, sanitizeForLog(string(body)))
+	}
+	var response GrafanaAnnotationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return response.ID, nil
+}
+
+// updateGrafanaAnnotation updates an existing annotation to create a time region
+func (r *StatefulSetReconciler) updateGrafanaAnnotation(
+	annotationID int64, statefulSetName, namespace, imageTag string,
+) error {
+	sanitizedName := sanitizeForLog(statefulSetName)
+	sanitizedNamespace := sanitizeForLog(namespace)
+	sanitizedTag := sanitizeForLog(imageTag)
+	patch := GrafanaAnnotationPatch{
+		TimeEnd:  time.Now().UnixMilli(),
+		IsRegion: true,
+		Tags:     []string{"deploy", sanitizedNamespace, sanitizedName, sanitizedTag, "region"},
+	}
+	jsonData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	url := fmt.Sprintf("%s/api/annotations/%d", r.GrafanaURL, annotationID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.GrafanaKey))
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			return fmt.Errorf("grafana API returned status %d and failed to read response body: %w", resp.StatusCode, rerr)
+		}
+		return fmt.Errorf("grafana API returned status %d: %s", resp.StatusCode, sanitizeForLog(string(body)))
+	}
+	return nil
+}
+
+// patchStatefulSetAnnotations applies annotation changes to a StatefulSet
+func (r *StatefulSetReconciler) patchStatefulSetAnnotations(
+	ctx context.Context, sts *appsv1.StatefulSet, annotations map[string]string,
+) error {
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	if err := r.Patch(ctx, sts, client.RawPatch(client.Merge.Type(), patchBytes)); err != nil {
+		return fmt.Errorf("failed to patch StatefulSet annotations: %w", err)
+	}
+	return nil
+}
+
+// mapNamespaceToStatefulSets maps namespace events to StatefulSet reconcile requests and cleans up on label removal
+func (r *StatefulSetReconciler) mapNamespaceToStatefulSets(
+	ctx context.Context, namespace client.Object,
+) []reconcile.Request {
+	logger := log.FromContext(ctx)
+	ns, ok := namespace.(*corev1.Namespace)
+	if !ok {
+		logger.Error(nil, "Failed to cast object to Namespace")
+		return nil
+	}
+	enabled := ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+	var stsList appsv1.StatefulSetList
+	if err := r.List(ctx, &stsList, client.InNamespace(ns.Name)); err != nil {
+		logger.Error(err, "Failed to list StatefulSets in namespace", "namespace", ns.Name)
+		return nil
+	}
+	if !enabled {
+		logger.Info("Namespace label removed, cleaning up annotations for StatefulSets",
+			"namespace", ns.Name, "statefulSetCount", len(stsList.Items))
+		for _, s := range stsList.Items {
+			if err := r.cleanupStatefulSetAnnotations(ctx, &s); err != nil {
+				logger.Error(err, "Failed to cleanup annotations", "statefulset", s.Name, "namespace", s.Namespace)
+			}
+		}
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, s := range stsList.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Name: s.Name, Namespace: s.Namespace}})
+	}
+	logger.Info("Namespace labeled for tracking, enqueuing StatefulSets",
+		"namespace", ns.Name, "statefulSetCount", len(requests))
+	return requests
+}
+
+func (r *StatefulSetReconciler) cleanupStatefulSetAnnotations(ctx context.Context, sts *appsv1.StatefulSet) error {
+	logger := log.FromContext(ctx)
+	hasAnnotations := false
+	annotationsToRemove := map[string]string{
+		GrafanaStartAnnotation:   "",
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: "",
+	}
+	if sts.Annotations != nil {
+		for key := range annotationsToRemove {
+			if _, exists := sts.Annotations[key]; exists {
+				hasAnnotations = true
+				break
+			}
+		}
+	}
+	if !hasAnnotations {
+		return nil
+	}
+	if err := r.patchStatefulSetAnnotations(ctx, sts, annotationsToRemove); err != nil {
+		return err
+	}
+	logger.Info("Cleaned up StatefulSet annotations",
+		"statefulset", sanitizeForLog(sts.Name), "namespace", sanitizeForLog(sts.Namespace))
+	return nil
+}
+
+func specChangedPredicateForStatefulSet() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldObj, ok := e.ObjectOld.(*appsv1.StatefulSet)
+			if !ok {
+				return false
+			}
+			newObj, ok := e.ObjectNew.(*appsv1.StatefulSet)
+			if !ok {
+				return false
+			}
+			oldSpecBytes, _ := json.Marshal(oldObj.Spec)
+			newSpecBytes, _ := json.Marshal(newObj.Spec)
+			if !bytes.Equal(oldSpecBytes, newSpecBytes) {
+				return true
+			}
+			// Also trigger on status changes to detect readiness without spec changes
+			oldStatusBytes, _ := json.Marshal(oldObj.Status)
+			newStatusBytes, _ := json.Marshal(newObj.Status)
+			return !bytes.Equal(oldStatusBytes, newStatusBytes)
+		},
+		CreateFunc:  func(e event.CreateEvent) bool { return true },
+		DeleteFunc:  func(e event.DeleteEvent) bool { return true },
+		GenericFunc: func(e event.GenericEvent) bool { return true },
+	}
+}
+
+func (r *StatefulSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&appsv1.StatefulSet{}, builder.WithPredicates(specChangedPredicateForStatefulSet())).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.mapNamespaceToStatefulSets),
+			builder.WithPredicates(namespaceLabelChangedPredicate())).
+		WithOptions(controller.Options{MaxConcurrentReconciles: DefaultMaxConcurrentReconciles}).
+		Complete(r)
+}
+
+// ==================
+// DaemonSet Reconciler
+// ==================
+
+// DaemonSetReconciler reconciles DaemonSet objects
+type DaemonSetReconciler struct {
+	client.Client
+	Scheme     *runtime.Scheme
+	K8sClient  kubernetes.Interface
+	GrafanaURL string
+	GrafanaKey string
+	HTTPClient *http.Client
+}
+
+func (r *DaemonSetReconciler) computeDaemonSetVersion(_ context.Context, ds *appsv1.DaemonSet, imageTag string) string {
+	return fmt.Sprintf("gen-%d-img-%s", ds.Generation, imageTag)
+}
+
+func (r *DaemonSetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	var ds appsv1.DaemonSet
+	if err := r.Get(ctx, req.NamespacedName, &ds); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			namespace, nerr := r.K8sClient.CoreV1().Namespaces().Get(ctx, req.Namespace, metav1.GetOptions{})
+			if nerr != nil {
+				logger.Error(nerr, "Failed to get namespace for deletion check", "namespace", req.Namespace)
+				return ctrl.Result{}, nil
+			}
+			if namespace.Labels["deployment-annotator"] == "enabled" {
+				logger.Info("DaemonSet deleted", "daemonset", req.Name, "namespace", req.Namespace)
+				return r.handleDaemonSetDeletion(ctx, req.Name, req.Namespace)
+			}
+			logger.V(1).Info("Ignoring deletion in unlabeled namespace", "daemonset", req.Name, "namespace", req.Namespace)
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Failed to get DaemonSet")
+		return ctrl.Result{}, err
+	}
+	namespace, err := r.K8sClient.CoreV1().Namespaces().Get(ctx, ds.Namespace, metav1.GetOptions{})
+	if err != nil {
+		logger.Error(err, "Failed to get namespace", "namespace", ds.Namespace)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	}
+	if namespace.Labels == nil || namespace.Labels["deployment-annotator"] != "enabled" {
+		return ctrl.Result{}, nil
+	}
+	logger.V(1).Info("Processing DaemonSet",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"generation", ds.Generation,
+		"observedGeneration", ds.Status.ObservedGeneration)
+	return r.handleDaemonSetEvent(ctx, &ds)
+}
+
+func (r *DaemonSetReconciler) handleDaemonSetEvent(ctx context.Context, ds *appsv1.DaemonSet) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if len(ds.Spec.Template.Spec.Containers) == 0 {
+		logger.Info("No containers found in DaemonSet",
+			"daemonset", sanitizeForLog(ds.Name), "namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{}, nil
+	}
+	imageRef := ds.Spec.Template.Spec.Containers[0].Image
+	imageTag := r.extractImageTag(imageRef)
+	currentVersion := r.computeDaemonSetVersion(ctx, ds, imageTag)
+	storedVersion := ds.Annotations[GrafanaVersionAnnotation]
+	startAnnotationID := ds.Annotations[GrafanaStartAnnotation]
+	if storedVersion == "" {
+		logger.Info("Initializing tracking for existing DaemonSet",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace),
+			"version", currentVersion)
+		return r.initializeDaemonSetTracking(ctx, ds, currentVersion)
+	}
+	if storedVersion != currentVersion {
+		logger.Info("DaemonSet version changed - creating annotations",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace),
+			"oldVersion", storedVersion,
+			"newVersion", currentVersion)
+		return r.handleNewDaemonSetVersion(ctx, ds, currentVersion, imageRef, imageTag, startAnnotationID)
+	}
+	logger.V(1).Info("DaemonSet event without version changes (likely rescheduling)",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"version", currentVersion)
+	return r.handleDaemonSetCompletion(ctx, ds, currentVersion, imageRef, imageTag, storedVersion, startAnnotationID)
+}
+
+func (r *DaemonSetReconciler) initializeDaemonSetTracking(
+	ctx context.Context, ds *appsv1.DaemonSet, currentVersion string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if err := r.patchDaemonSetAnnotations(ctx, ds, map[string]string{
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to initialize DaemonSet tracking",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	logger.V(1).Info("DaemonSet tracking initialized (no Grafana annotation created)",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"version", currentVersion)
+	return ctrl.Result{}, nil
+}
+
+func (r *DaemonSetReconciler) handleNewDaemonSetVersion(
+	ctx context.Context, ds *appsv1.DaemonSet, currentVersion, imageRef, imageTag, startAnnotationID string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if startAnnotationID == "" {
+		return r.createDaemonSetStartAnnotation(ctx, ds, currentVersion, imageRef, imageTag)
+	}
+	newStartAnnotationID, err := r.createGrafanaAnnotation(ds.Name, ds.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create new start annotation for DaemonSet version change",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if err := r.patchDaemonSetAnnotations(ctx, ds, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(newStartAnnotationID, 10),
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to update annotations for DaemonSet version change",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	logger.Info("DaemonSet version changed - updated annotations in place",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"newVersion", currentVersion,
+		"newStartAnnotationID", newStartAnnotationID)
+	return ctrl.Result{}, nil
+}
+
+func (r *DaemonSetReconciler) createDaemonSetStartAnnotation(
+	ctx context.Context, ds *appsv1.DaemonSet, currentVersion, imageRef, imageTag string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	annotationID, err := r.createGrafanaAnnotation(ds.Name, ds.Namespace, imageTag, imageRef, "started")
+	if err != nil {
+		logger.Error(err, "Failed to create start annotation",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if err := r.patchDaemonSetAnnotations(ctx, ds, map[string]string{
+		GrafanaStartAnnotation:   strconv.FormatInt(annotationID, 10),
+		GrafanaVersionAnnotation: currentVersion,
+	}); err != nil {
+		logger.Error(err, "Failed to store start annotation ID and version",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	logger.Info("Created DaemonSet start annotation",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"annotationID", annotationID,
+		"version", currentVersion)
+	return ctrl.Result{}, nil
+}
+
+func (r *DaemonSetReconciler) handleDaemonSetCompletion(
+	ctx context.Context, ds *appsv1.DaemonSet, currentVersion, imageRef, imageTag, storedVersion, startAnnotationID string,
+) (ctrl.Result, error) {
+	if !r.isDaemonSetReady(ds) || storedVersion != currentVersion {
+		return ctrl.Result{}, nil
+	}
+	endAnnotationID := ds.Annotations[GrafanaEndAnnotation]
+	if endAnnotationID != "" || startAnnotationID == "" {
+		return ctrl.Result{}, nil
+	}
+	return r.createDaemonSetEndAnnotation(ctx, ds, imageRef, imageTag, startAnnotationID)
+}
+
+func (r *DaemonSetReconciler) createDaemonSetEndAnnotation(
+	ctx context.Context, ds *appsv1.DaemonSet, imageRef, imageTag, startAnnotationID string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	annotationID, err := r.createGrafanaAnnotation(ds.Name, ds.Namespace, imageTag, imageRef, "completed")
+	if err != nil {
+		logger.Error(err, "Failed to create end annotation",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if err := r.patchDaemonSetAnnotations(ctx, ds, map[string]string{
+		GrafanaEndAnnotation: strconv.FormatInt(annotationID, 10),
+	}); err != nil {
+		logger.Error(err, "Failed to store end annotation ID",
+			"daemonset", sanitizeForLog(ds.Name),
+			"namespace", sanitizeForLog(ds.Namespace))
+		return ctrl.Result{RequeueAfter: time.Minute}, err
+	}
+	if startID, err := strconv.ParseInt(startAnnotationID, 10, 64); err == nil {
+		if err := r.updateGrafanaAnnotation(startID, ds.Name, ds.Namespace, imageTag); err != nil {
+			logger.Error(err, "Failed to update start annotation to region", "startAnnotationID", startID)
+		}
+	}
+	logger.Info("DaemonSet completed",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace),
+		"endAnnotationID", annotationID)
+	return ctrl.Result{}, nil
+}
+
+func (r *DaemonSetReconciler) handleDaemonSetDeletion(
+	ctx context.Context, name, namespace string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if _, err := r.createGrafanaAnnotation(name, namespace, "", "", "deleted"); err != nil {
+		logger.Error(err, "Failed to create deletion annotation",
+			"daemonset", sanitizeForLog(name),
+			"namespace", sanitizeForLog(namespace))
+		return ctrl.Result{}, err
+	}
+	logger.Info("Created DaemonSet deletion annotation",
+		"daemonset", sanitizeForLog(name), "namespace", sanitizeForLog(namespace))
+	return ctrl.Result{}, nil
+}
+
+func (r *DaemonSetReconciler) isDaemonSetReady(ds *appsv1.DaemonSet) bool {
+	return ds.Status.NumberAvailable > 0 &&
+		ds.Status.NumberAvailable == ds.Status.DesiredNumberScheduled &&
+		ds.Status.ObservedGeneration == ds.Generation
+}
+
+func (r *DaemonSetReconciler) extractImageTag(imageRef string) string {
+	parts := strings.Split(imageRef, ":")
+	if len(parts) < ImageTagSeparatorCount {
+		return "latest"
+	}
+	return parts[len(parts)-1]
+}
+
+func (r *DaemonSetReconciler) createGrafanaAnnotation(
+	daemonSetName, namespace, imageTag, imageRef, eventType string,
+) (int64, error) {
+	sanitizedName := sanitizeForLog(daemonSetName)
+	sanitizedNamespace := sanitizeForLog(namespace)
+	sanitizedTag := sanitizeForLog(imageTag)
+	sanitizedRef := sanitizeForLog(imageRef)
+	var what, data string
+	switch eventType {
+	case "started":
+		what = fmt.Sprintf("deploy-start:%s", sanitizedName)
+		data = fmt.Sprintf("Started deployment %s", sanitizedRef)
+	case "completed":
+		what = fmt.Sprintf("deploy-end:%s", sanitizedName)
+		data = fmt.Sprintf("Completed deployment %s", sanitizedRef)
+	case "deleted":
+		what = fmt.Sprintf("deploy-delete:%s", sanitizedName)
+		data = fmt.Sprintf("Deleted deployment %s", sanitizedName)
+	default:
+		what = fmt.Sprintf("deploy:%s", sanitizedName)
+		data = fmt.Sprintf("Deployment event: %s", eventType)
+	}
+	annotation := GrafanaAnnotation{
+		What: what,
+		Tags: []string{"deploy", sanitizedNamespace, sanitizedName, sanitizedTag, eventType},
+		Data: data,
+		When: time.Now().Unix(),
+	}
+	jsonData, err := json.Marshal(annotation)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal annotation: %w", err)
+	}
+	url := fmt.Sprintf("%s/api/annotations/graphite", r.GrafanaURL)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.GrafanaKey))
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			return 0, fmt.Errorf("grafana API returned status %d and failed to read response body: %w", resp.StatusCode, rerr)
+		}
+		return 0, fmt.Errorf("grafana API returned status %d: %s", resp.StatusCode, sanitizeForLog(string(body)))
+	}
+	var response GrafanaAnnotationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return response.ID, nil
+}
+
+func (r *DaemonSetReconciler) updateGrafanaAnnotation(
+	annotationID int64, daemonSetName, namespace, imageTag string,
+) error {
+	sanitizedName := sanitizeForLog(daemonSetName)
+	sanitizedNamespace := sanitizeForLog(namespace)
+	sanitizedTag := sanitizeForLog(imageTag)
+	patch := GrafanaAnnotationPatch{
+		TimeEnd:  time.Now().UnixMilli(),
+		IsRegion: true,
+		Tags:     []string{"deploy", sanitizedNamespace, sanitizedName, sanitizedTag, "region"},
+	}
+	jsonData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	url := fmt.Sprintf("%s/api/annotations/%d", r.GrafanaURL, annotationID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.GrafanaKey))
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			return fmt.Errorf("grafana API returned status %d and failed to read response body: %w", resp.StatusCode, rerr)
+		}
+		return fmt.Errorf("grafana API returned status %d: %s", resp.StatusCode, sanitizeForLog(string(body)))
+	}
+	return nil
+}
+
+func (r *DaemonSetReconciler) patchDaemonSetAnnotations(
+	ctx context.Context, ds *appsv1.DaemonSet, annotations map[string]string,
+) error {
+	patch := map[string]interface{}{"metadata": map[string]interface{}{"annotations": annotations}}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	if err := r.Patch(ctx, ds, client.RawPatch(client.Merge.Type(), patchBytes)); err != nil {
+		return fmt.Errorf("failed to patch DaemonSet annotations: %w", err)
+	}
+	return nil
+}
+
+func (r *DaemonSetReconciler) mapNamespaceToDaemonSets(
+	ctx context.Context, namespace client.Object,
+) []reconcile.Request {
+	logger := log.FromContext(ctx)
+	ns, ok := namespace.(*corev1.Namespace)
+	if !ok {
+		logger.Error(nil, "Failed to cast object to Namespace")
+		return nil
+	}
+	enabled := ns.Labels != nil && ns.Labels["deployment-annotator"] == "enabled"
+	var dsList appsv1.DaemonSetList
+	if err := r.List(ctx, &dsList, client.InNamespace(ns.Name)); err != nil {
+		logger.Error(err, "Failed to list DaemonSets in namespace", "namespace", ns.Name)
+		return nil
+	}
+	if !enabled {
+		logger.Info(
+			"Namespace label removed, cleaning up annotations for DaemonSets",
+			"namespace", ns.Name, "daemonSetCount", len(dsList.Items))
+		for _, d := range dsList.Items {
+			if err := r.cleanupDaemonSetAnnotations(ctx, &d); err != nil {
+				logger.Error(err, "Failed to cleanup annotations", "daemonset", d.Name, "namespace", d.Namespace)
+			}
+		}
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, d := range dsList.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Name: d.Name, Namespace: d.Namespace}})
+	}
+	logger.Info("Namespace labeled for tracking, enqueuing DaemonSets",
+		"namespace", ns.Name, "daemonSetCount", len(requests))
+	return requests
+}
+
+func (r *DaemonSetReconciler) cleanupDaemonSetAnnotations(ctx context.Context, ds *appsv1.DaemonSet) error {
+	logger := log.FromContext(ctx)
+	hasAnnotations := false
+	annotationsToRemove := map[string]string{
+		GrafanaStartAnnotation:   "",
+		GrafanaEndAnnotation:     "",
+		GrafanaVersionAnnotation: "",
+	}
+	if ds.Annotations != nil {
+		for key := range annotationsToRemove {
+			if _, exists := ds.Annotations[key]; exists {
+				hasAnnotations = true
+				break
+			}
+		}
+	}
+	if !hasAnnotations {
+		return nil
+	}
+	if err := r.patchDaemonSetAnnotations(ctx, ds, annotationsToRemove); err != nil {
+		return err
+	}
+	logger.Info(
+		"Cleaned up DaemonSet annotations",
+		"daemonset", sanitizeForLog(ds.Name),
+		"namespace", sanitizeForLog(ds.Namespace))
+	return nil
+}
+
+func specChangedPredicateForDaemonSet() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldObj, ok := e.ObjectOld.(*appsv1.DaemonSet)
+			if !ok {
+				return false
+			}
+			newObj, ok := e.ObjectNew.(*appsv1.DaemonSet)
+			if !ok {
+				return false
+			}
+			oldSpecBytes, _ := json.Marshal(oldObj.Spec)
+			newSpecBytes, _ := json.Marshal(newObj.Spec)
+			if !bytes.Equal(oldSpecBytes, newSpecBytes) {
+				return true
+			}
+			oldStatusBytes, _ := json.Marshal(oldObj.Status)
+			newStatusBytes, _ := json.Marshal(newObj.Status)
+			return !bytes.Equal(oldStatusBytes, newStatusBytes)
+		},
+		CreateFunc:  func(e event.CreateEvent) bool { return true },
+		DeleteFunc:  func(e event.DeleteEvent) bool { return true },
+		GenericFunc: func(e event.GenericEvent) bool { return true },
+	}
+}
+
+func (r *DaemonSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&appsv1.DaemonSet{}, builder.WithPredicates(specChangedPredicateForDaemonSet())).
+		Watches(
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.mapNamespaceToDaemonSets),
+			builder.WithPredicates(namespaceLabelChangedPredicate())).
+		WithOptions(controller.Options{MaxConcurrentReconciles: DefaultMaxConcurrentReconciles}).
+		Complete(r)
+}
+
 func main() {
 	// Initialize scheme
 	scheme := runtime.NewScheme()
@@ -870,7 +1798,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup reconciler
+	// Setup reconciler for Deployments
 	reconciler := &DeploymentReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
@@ -882,6 +1810,34 @@ func main() {
 
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		logger.Error(err, "Failed to setup controller")
+		os.Exit(1)
+	}
+
+	// Setup reconciler for StatefulSets
+	stsReconciler := &StatefulSetReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		K8sClient:  k8sClient,
+		GrafanaURL: strings.TrimSuffix(grafanaURL, "/"),
+		GrafanaKey: grafanaKey,
+		HTTPClient: &http.Client{Timeout: HTTPTimeoutSeconds * time.Second},
+	}
+	if err = stsReconciler.SetupWithManager(mgr); err != nil {
+		logger.Error(err, "Failed to setup StatefulSet controller")
+		os.Exit(1)
+	}
+
+	// Setup reconciler for DaemonSets
+	dsReconciler := &DaemonSetReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		K8sClient:  k8sClient,
+		GrafanaURL: strings.TrimSuffix(grafanaURL, "/"),
+		GrafanaKey: grafanaKey,
+		HTTPClient: &http.Client{Timeout: HTTPTimeoutSeconds * time.Second},
+	}
+	if err = dsReconciler.SetupWithManager(mgr); err != nil {
+		logger.Error(err, "Failed to setup DaemonSet controller")
 		os.Exit(1)
 	}
 
