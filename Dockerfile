@@ -18,8 +18,8 @@ RUN apk add --no-cache git ca-certificates tzdata
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
-# Copy source code
-COPY main.go ./
+# Copy source code (entire module for internal packages)
+COPY . .
 
 # Ensure go.mod is up to date with dependencies
 RUN go mod tidy
