@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.4.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.4.0...v1.4.1) (2025-08-08)
+
+
+### 🐛 Bug Fixes
+
+* refactor codebase to be more modular ([115778d](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/115778d3dce6133ee5eed0b818c353fa8654524c))
+
+
+### ♻️ Code Refactoring
+
+* add internal grafana client and util ([f12c320](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/f12c320e8c1da13b8db5afec38e4c02a9de1afdc))
+
 ## [1.4.0](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.2...v1.4.0) (2025-08-08)
 
 
