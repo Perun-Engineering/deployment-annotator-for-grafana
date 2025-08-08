@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.4.0](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.2...v1.4.0) (2025-08-08)
+
+
+### 🎯 Features
+
+* Added support for StatefulSets and DaemonSets ([997a890](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/997a890d6e26b091b77a7a18fed67e3d01e1464f))
+
 ## [1.3.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.3.1...v1.3.2) (2025-08-05)
 
 
