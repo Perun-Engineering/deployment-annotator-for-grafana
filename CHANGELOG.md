@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.0](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.4.1...v1.5.0) (2025-08-08)
+
+
+### 🎯 Features
+
+* add selective workload watching ([ad6ee81](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/ad6ee8145d6ae494c917123bb3be6216899278df))
+
 ## [1.4.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.4.0...v1.4.1) (2025-08-08)
 
 
