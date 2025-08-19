@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.1...v1.5.2) (2025-08-19)
+
+
+### 📦 Dependencies
+
+* **deps:** bump golang from 1.24-alpine to 1.25-alpine ([40cc0c2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/40cc0c2a5d379faf7229b9b9fd4c44ca20f8cbd2))
+
 ## [1.5.1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.0...v1.5.1) (2025-08-19)
 
 
