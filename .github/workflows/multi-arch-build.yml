@@ -39,7 +39,7 @@ jobs:
     steps:
       - name: Check CI workflow status
         id: check-ci
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
@@ -57,7 +57,7 @@ jobs:
 
       - name: Check Security workflow status
         id: check-security
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
