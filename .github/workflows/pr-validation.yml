@@ -67,7 +67,7 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #   - name: Check for required labels
-  #     uses: actions/github-script@v7
+  #     uses: actions/github-script@v8
   #     with:
   #       script: |
   #         # Label validation disabled for simplified workflow
@@ -83,7 +83,7 @@ jobs:
         fetch-depth: 0
 
     - name: Check PR size
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const { data: pullRequest } = await github.rest.pulls.get({
@@ -169,7 +169,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check PR description
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const { data: pullRequest } = await github.rest.pulls.get({
