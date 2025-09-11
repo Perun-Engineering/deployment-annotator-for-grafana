@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.3](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.2...v1.5.3) (2025-09-11)
+
+
+### 📦 Dependencies
+
+* **deps:** bump golang.org/x/text from 0.28.0 to 0.29.0 ([bba23b6](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/bba23b61630afa24ff924f3bb2f57e7267a5de51))
+* **deps:** bump k8s.io/apimachinery from 0.33.4 to 0.34.0 ([c978ef4](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/c978ef4301d30effe0cc031d6d27c6b6fbcb8851))
+* **deps:** bump k8s.io/client-go from 0.33.4 to 0.34.0 ([7756e8b](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/7756e8b5497a6b13e2a6f418db1692deb44b2198))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.21.0 to 0.22.0 ([7112669](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/711266909ba0083257cf94c3ab45784d1c498de8))
+
 ## [1.5.2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.1...v1.5.2) (2025-08-19)
 
 
