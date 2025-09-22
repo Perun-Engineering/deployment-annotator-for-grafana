@@ -142,7 +142,7 @@ jobs:
           exit-code: "1"
 
       - name: Run Grype vulnerability scanner
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         id: grype-scan
         with:
           image: "security-scan:latest"
