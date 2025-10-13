@@ -41,7 +41,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
@@ -51,7 +51,7 @@ jobs:
           go build -v ./...
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{matrix.language}}"
 
@@ -128,7 +128,7 @@ jobs:
           output: "trivy-results.sarif"
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
@@ -150,7 +150,7 @@ jobs:
           severity-cutoff: "high"
 
       - name: Upload Grype scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && steps.grype-scan.outputs.sarif != ''
         with:
           sarif_file: ${{ steps.grype-scan.outputs.sarif }}
@@ -301,7 +301,7 @@ jobs:
           echo "Static analysis completed successfully"
 
       - name: Upload Static Analysis results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('gosec-results.sarif') != ''
         with:
           sarif_file: gosec-results.sarif
@@ -314,7 +314,7 @@ jobs:
           semgrep --config=auto --sarif --output=semgrep-results.sarif ./
 
       - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('semgrep-results.sarif') != ''
         with:
           sarif_file: semgrep-results.sarif
