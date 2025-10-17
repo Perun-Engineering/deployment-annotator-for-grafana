@@ -97,7 +97,7 @@ jobs:
           echo "Static analysis completed successfully"
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('gosec.sarif') != ''
         with:
           sarif_file: gosec.sarif
@@ -235,7 +235,7 @@ jobs:
           output: "trivy-results.sarif"
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
