@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.4](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.3...v1.5.4) (2025-10-17)
+
+
+### 📦 Dependencies
+
+* **deps:** bump golang.org/x/text from 0.29.0 to 0.30.0 ([2247be1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/2247be1b0b3d522038cf0bd94e078fa3186c3960))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.22.1 to 0.22.3 ([5fb8af3](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/5fb8af320dc1bf5de3428ef2955fc7ba31bf1bd6))
+
 ## [1.5.3](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.2...v1.5.3) (2025-09-11)
 
 
