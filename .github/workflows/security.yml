@@ -76,7 +76,7 @@ jobs:
           govulncheck -json ./... > govulncheck-results.json || true
 
       - name: Upload govulncheck results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: govulncheck-results
           path: govulncheck-results.json
@@ -242,7 +242,7 @@ jobs:
           fi
 
       - name: Upload Kubesec results
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: kubesec-results
           path: kubesec-results.json
@@ -344,7 +344,7 @@ jobs:
           go-licenses report ./... > licenses.txt
 
       - name: Upload license report
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: license-report
           path: licenses.txt
