@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/text v0.30.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
