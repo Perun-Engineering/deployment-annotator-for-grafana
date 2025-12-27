@@ -23,8 +23,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
-          token: ${{ secrets.SEMANTIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -42,7 +44,7 @@ jobs:
             @semantic-release/exec@6
             conventional-changelog-conventionalcommits@7
         env:
-          GITHUB_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
       - name: Output release information
         if: steps.semantic.outputs.new-release-published == 'true'
