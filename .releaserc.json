@@ -1,6 +1,5 @@
 {
   "branches": ["main"],
-  "repositoryUrl": "https://github.com/Perun-Engineering/deployment-annotator-for-grafana",
   "plugins": [
     [
       "@semantic-release/commit-analyzer",
