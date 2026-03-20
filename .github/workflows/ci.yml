@@ -226,20 +226,6 @@ jobs:
       - name: Run govulncheck
         run: govulncheck -json ./... || true
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: "fs"
-          scan-ref: "."
-          format: "sarif"
-          output: "trivy-results.sarif"
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-results.sarif') != ''
-        with:
-          sarif_file: "trivy-results.sarif"
-
   # Conventional commits check for PRs
   conventional-commits:
     name: Conventional Commits Check

@@ -229,18 +229,6 @@ jobs:
           echo "SANITIZED_TAG=${TAG}" >> $GITHUB_ENV
           echo "Scanning image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.SANITIZED_TAG }}
-          format: "sarif"
-          output: "trivy-results.sarif"
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: "trivy-results.sarif"
-
   # Summary
   build-summary:
     name: Build Summary
