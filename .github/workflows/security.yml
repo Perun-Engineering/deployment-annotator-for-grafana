@@ -175,10 +175,11 @@ jobs:
             --set image.tag=test > k8s-manifests.yaml
 
       - name: Install Polaris
-        run: |
-          # Install Polaris CLI for Kubernetes security scanning
-          curl -L https://github.com/FairwindsOps/polaris/releases/latest/download/polaris_linux_amd64.tar.gz | tar xz
-          sudo mv polaris /usr/local/bin/
+        uses: jaxxstorm/action-install-gh-release@v3.0.0
+        with:
+          repo: FairwindsOps/polaris
+          tag: latest
+          cache: enable
 
       - name: Run Polaris security scan
         run: |
