@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/perun-engineering/deployment-annotator-for-grafana/internal/grafana"
 	apputil "github.com/perun-engineering/deployment-annotator-for-grafana/internal/util"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -20,7 +19,7 @@ import (
 
 // createAnnotation builds and sends a Grafana annotation for a workload event.
 func createAnnotation(
-	ctx context.Context, gc *grafana.Client,
+	ctx context.Context, gc AnnotationClient,
 	kind, name, namespace, imageTag, imageRef, eventType string,
 ) (int64, error) {
 	sName := apputil.SanitizeForLog(name)
@@ -41,7 +40,7 @@ func createAnnotation(
 
 // updateAnnotationToRegion patches a start annotation into a time-region.
 func updateAnnotationToRegion(
-	ctx context.Context, gc *grafana.Client,
+	ctx context.Context, gc AnnotationClient,
 	id int64, kind, name, namespace, imageTag string,
 ) error {
 	tags := []string{

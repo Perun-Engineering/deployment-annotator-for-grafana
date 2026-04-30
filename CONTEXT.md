@@ -7,6 +7,7 @@
 - **Version** — an opaque string that identifies a workload's current spec. Built from Kubernetes generation + container image tag (or pod-template-hash for Deployments). Two reconcile events with the same version are treated as no-ops (scaling, rescheduling).
 - **Annotation lifecycle** — the three-phase Grafana annotation sequence for a workload change: **start** (spec changed) → **end** (rollout complete) → **region** (start annotation patched into a time-region spanning start→end).
 - **Adapter** — a small interface (`WorkloadAdapter`) that captures the differences between workload kinds: version computation, readiness check, and whether completion is detected via status changes or a secondary watch.
+- **AnnotationClient** — the seam between the reconciler and the annotation backend. Defined in `internal/controller` (consumer-side). `grafana.Client` satisfies it; tests supply a fake. Two methods: `CreateAnnotation` and `UpdateAnnotationToRegion`.
 - **Completion detection** — how the controller learns a rollout finished. Deployments use ReplicaSet events (secondary watch). StatefulSets and DaemonSets use their own status-change predicates.
 
 ## Package layout

@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/perun-engineering/deployment-annotator-for-grafana/internal/grafana"
 	apputil "github.com/perun-engineering/deployment-annotator-for-grafana/internal/util"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,11 +26,18 @@ const (
 	DefaultMaxConcurrentReconciles = 2
 )
 
+// AnnotationClient is the seam between the reconciler and the annotation backend.
+// grafana.Client satisfies this interface; tests can supply a fake.
+type AnnotationClient interface {
+	CreateAnnotation(ctx context.Context, what string, tags []string, data string) (int64, error)
+	UpdateAnnotationToRegion(ctx context.Context, id int64, tags []string) error
+}
+
 // WorkloadReconciler reconciles any workload type via its WorkloadAdapter.
 type WorkloadReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
-	GClient *grafana.Client
+	GClient AnnotationClient
 	Adapter WorkloadAdapter
 }
 
