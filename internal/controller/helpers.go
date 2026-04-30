@@ -71,23 +71,6 @@ func patchAnnotations(ctx context.Context, c client.Client, obj client.Object, a
 	return nil
 }
 
-// extractContainerImage returns the first container image from a workload, or "".
-func extractContainerImage(obj client.Object) string {
-	var containers []corev1.Container
-	switch w := obj.(type) {
-	case *appsv1.Deployment:
-		containers = w.Spec.Template.Spec.Containers
-	case *appsv1.StatefulSet:
-		containers = w.Spec.Template.Spec.Containers
-	case *appsv1.DaemonSet:
-		containers = w.Spec.Template.Spec.Containers
-	}
-	if len(containers) == 0 {
-		return ""
-	}
-	return containers[0].Image
-}
-
 // specChangedPredicate triggers on spec changes. When includeStatus is true
 // it also triggers on status changes (used by StatefulSet/DaemonSet which
 // detect completion via their own status, not via a secondary watch).

@@ -72,7 +72,7 @@ func (r *WorkloadReconciler) handleEvent(ctx context.Context, obj client.Object,
 	name := apputil.SanitizeForLog(obj.GetName())
 	ns := apputil.SanitizeForLog(obj.GetNamespace())
 
-	imageRef := extractContainerImage(obj)
+	imageRef := r.Adapter.ContainerImage(obj)
 	if imageRef == "" {
 		logger.Info("No containers found", "kind", kind, "name", name, "namespace", ns)
 		return ctrl.Result{}, nil

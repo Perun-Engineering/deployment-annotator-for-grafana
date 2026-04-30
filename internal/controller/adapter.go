@@ -15,6 +15,7 @@ type WorkloadAdapter interface {
 	Kind() string
 	NewObject() client.Object
 	NewObjectList() client.ObjectList
+	ContainerImage(obj client.Object) string
 	ComputeVersion(ctx context.Context, c client.Client, obj client.Object, imageTag string) string
 	IsReady(obj client.Object) bool
 	WatchesStatus() bool
@@ -28,6 +29,13 @@ func (DeploymentAdapter) Kind() string                     { return "deployment"
 func (DeploymentAdapter) NewObject() client.Object         { return &appsv1.Deployment{} }
 func (DeploymentAdapter) NewObjectList() client.ObjectList { return &appsv1.DeploymentList{} }
 func (DeploymentAdapter) WatchesStatus() bool              { return false }
+
+func (DeploymentAdapter) ContainerImage(obj client.Object) string {
+	if c := obj.(*appsv1.Deployment).Spec.Template.Spec.Containers; len(c) > 0 {
+		return c[0].Image
+	}
+	return ""
+}
 
 func (DeploymentAdapter) ComputeVersion(
 	ctx context.Context, c client.Client, obj client.Object, imageTag string,
@@ -76,6 +84,13 @@ func (StatefulSetAdapter) NewObject() client.Object         { return &appsv1.Sta
 func (StatefulSetAdapter) NewObjectList() client.ObjectList { return &appsv1.StatefulSetList{} }
 func (StatefulSetAdapter) WatchesStatus() bool              { return true }
 
+func (StatefulSetAdapter) ContainerImage(obj client.Object) string {
+	if c := obj.(*appsv1.StatefulSet).Spec.Template.Spec.Containers; len(c) > 0 {
+		return c[0].Image
+	}
+	return ""
+}
+
 func (StatefulSetAdapter) ComputeVersion(
 	_ context.Context, _ client.Client, obj client.Object, imageTag string,
 ) string {
@@ -100,6 +115,13 @@ func (DaemonSetAdapter) Kind() string                     { return "daemonset" }
 func (DaemonSetAdapter) NewObject() client.Object         { return &appsv1.DaemonSet{} }
 func (DaemonSetAdapter) NewObjectList() client.ObjectList { return &appsv1.DaemonSetList{} }
 func (DaemonSetAdapter) WatchesStatus() bool              { return true }
+
+func (DaemonSetAdapter) ContainerImage(obj client.Object) string {
+	if c := obj.(*appsv1.DaemonSet).Spec.Template.Spec.Containers; len(c) > 0 {
+		return c[0].Image
+	}
+	return ""
+}
 
 func (DaemonSetAdapter) ComputeVersion(_ context.Context, _ client.Client, obj client.Object, imageTag string) string {
 	return fmt.Sprintf("gen-%d-img-%s", obj.(*appsv1.DaemonSet).Generation, imageTag)
