@@ -19,6 +19,9 @@ type WorkloadAdapter interface {
 	ComputeVersion(ctx context.Context, c client.Client, obj client.Object, imageTag string) string
 	IsReady(obj client.Object) bool
 	WatchesStatus() bool
+	Spec(obj client.Object) interface{}
+	Status(obj client.Object) interface{}
+	ExtractItems(list client.ObjectList) []client.Object
 }
 
 // --- Deployment adapter ---
@@ -75,6 +78,20 @@ func (DeploymentAdapter) IsReady(obj client.Object) bool {
 		d.Status.ObservedGeneration == d.Generation
 }
 
+func (DeploymentAdapter) Spec(obj client.Object) interface{} { return obj.(*appsv1.Deployment).Spec }
+func (DeploymentAdapter) Status(obj client.Object) interface{} {
+	return obj.(*appsv1.Deployment).Status
+}
+
+func (DeploymentAdapter) ExtractItems(list client.ObjectList) []client.Object {
+	l := list.(*appsv1.DeploymentList)
+	out := make([]client.Object, len(l.Items))
+	for i := range l.Items {
+		out[i] = &l.Items[i]
+	}
+	return out
+}
+
 // --- StatefulSet adapter ---
 
 type StatefulSetAdapter struct{}
@@ -107,6 +124,20 @@ func (StatefulSetAdapter) IsReady(obj client.Object) bool {
 		s.Status.ObservedGeneration == s.Generation
 }
 
+func (StatefulSetAdapter) Spec(obj client.Object) interface{} { return obj.(*appsv1.StatefulSet).Spec }
+func (StatefulSetAdapter) Status(obj client.Object) interface{} {
+	return obj.(*appsv1.StatefulSet).Status
+}
+
+func (StatefulSetAdapter) ExtractItems(list client.ObjectList) []client.Object {
+	l := list.(*appsv1.StatefulSetList)
+	out := make([]client.Object, len(l.Items))
+	for i := range l.Items {
+		out[i] = &l.Items[i]
+	}
+	return out
+}
+
 // --- DaemonSet adapter ---
 
 type DaemonSetAdapter struct{}
@@ -132,4 +163,16 @@ func (DaemonSetAdapter) IsReady(obj client.Object) bool {
 	return d.Status.NumberAvailable > 0 &&
 		d.Status.NumberAvailable == d.Status.DesiredNumberScheduled &&
 		d.Status.ObservedGeneration == d.Generation
+}
+
+func (DaemonSetAdapter) Spec(obj client.Object) interface{}   { return obj.(*appsv1.DaemonSet).Spec }
+func (DaemonSetAdapter) Status(obj client.Object) interface{} { return obj.(*appsv1.DaemonSet).Status }
+
+func (DaemonSetAdapter) ExtractItems(list client.ObjectList) []client.Object {
+	l := list.(*appsv1.DaemonSetList)
+	out := make([]client.Object, len(l.Items))
+	for i := range l.Items {
+		out[i] = &l.Items[i]
+	}
+	return out
 }

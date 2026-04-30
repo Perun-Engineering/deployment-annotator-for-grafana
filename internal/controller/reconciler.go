@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -33,11 +32,13 @@ type AnnotationClient interface {
 }
 
 // WorkloadReconciler reconciles any workload type via its WorkloadAdapter.
+// It handles Kubernetes fetching, namespace checks, version computation, and
+// readiness detection. All annotation lifecycle logic is delegated to Lifecycle.
 type WorkloadReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	GClient AnnotationClient
-	Adapter WorkloadAdapter
+	Scheme    *runtime.Scheme
+	Adapter   WorkloadAdapter
+	Lifecycle *AnnotationLifecycle
 }
 
 func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -53,7 +54,6 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// Check namespace label
 	var ns corev1.Namespace
 	if err := r.Get(ctx, client.ObjectKey{Name: obj.GetNamespace()}, &ns); err != nil {
 		logger.Error(err, "Failed to get namespace", "namespace", obj.GetNamespace())
@@ -85,124 +85,31 @@ func (r *WorkloadReconciler) handleEvent(ctx context.Context, obj client.Object,
 
 	imageTag := extractImageTag(imageRef)
 	currentVersion := r.Adapter.ComputeVersion(ctx, r.Client, obj, imageTag)
-	annotations := obj.GetAnnotations()
-	storedVersion := annotations[VersionAnnotation]
-	startID := annotations[StartAnnotation]
+	storedVersion := obj.GetAnnotations()[VersionAnnotation]
 
 	if storedVersion == "" {
 		logger.Info("Initializing tracking", "kind", kind, "name", name, "namespace", ns, "version", currentVersion)
-		return r.initializeTracking(ctx, obj, currentVersion)
+		if err := r.Lifecycle.InitializeTracking(ctx, obj, currentVersion); err != nil {
+			return ctrl.Result{RequeueAfter: time.Minute}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	if storedVersion != currentVersion {
 		logger.Info("Version changed", "kind", kind, "name", name, "namespace", ns,
 			"oldVersion", storedVersion, "newVersion", currentVersion)
-		return r.handleNewVersion(ctx, obj, kind, currentVersion, imageRef, imageTag, startID)
+		if err := r.Lifecycle.StartDeployment(ctx, obj, kind, currentVersion, imageRef, imageTag); err != nil {
+			return ctrl.Result{RequeueAfter: time.Minute}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	logger.V(1).Info("No version change", "kind", kind, "name", name, "namespace", ns, "version", currentVersion)
-	return r.handleCompletion(ctx, obj, kind, currentVersion, imageRef, imageTag, storedVersion, startID)
-}
-
-func (r *WorkloadReconciler) initializeTracking(
-	ctx context.Context, obj client.Object, version string,
-) (ctrl.Result, error) {
-	if err := patchAnnotations(ctx, r.Client, obj, map[string]string{
-		VersionAnnotation: version,
-	}); err != nil {
-		log.FromContext(ctx).Error(err, "Failed to initialize tracking")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func (r *WorkloadReconciler) handleNewVersion(
-	ctx context.Context, obj client.Object,
-	kind, version, imageRef, imageTag, startID string,
-) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	if startID == "" {
-		return r.createStartAnnotation(ctx, obj, kind, version, imageRef, imageTag)
-	}
-
-	newID, err := createAnnotation(ctx, r.GClient, kind, obj.GetName(), obj.GetNamespace(), imageTag, imageRef, "started")
-	if err != nil {
-		logger.Error(err, "Failed to create start annotation for version change")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	if err := patchAnnotations(ctx, r.Client, obj, map[string]string{
-		StartAnnotation:   strconv.FormatInt(newID, 10),
-		EndAnnotation:     "",
-		VersionAnnotation: version,
-	}); err != nil {
-		logger.Error(err, "Failed to update annotations for version change")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	logger.Info("Updated annotations for version change", "kind", kind, "newStartAnnotationID", newID)
-	return ctrl.Result{}, nil
-}
-
-func (r *WorkloadReconciler) createStartAnnotation(
-	ctx context.Context, obj client.Object,
-	kind, version, imageRef, imageTag string,
-) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	id, err := createAnnotation(ctx, r.GClient, kind, obj.GetName(), obj.GetNamespace(), imageTag, imageRef, "started")
-	if err != nil {
-		logger.Error(err, "Failed to create start annotation")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	if err := patchAnnotations(ctx, r.Client, obj, map[string]string{
-		StartAnnotation:   strconv.FormatInt(id, 10),
-		VersionAnnotation: version,
-	}); err != nil {
-		logger.Error(err, "Failed to store start annotation")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	logger.Info("Created start annotation", "kind", kind, "annotationID", id, "version", version)
-	return ctrl.Result{}, nil
-}
-
-func (r *WorkloadReconciler) handleCompletion(
-	ctx context.Context, obj client.Object,
-	kind, currentVersion, imageRef, imageTag, storedVersion, startID string,
-) (ctrl.Result, error) {
-	if !r.Adapter.IsReady(obj) || storedVersion != currentVersion {
-		return ctrl.Result{}, nil
-	}
-	annotations := obj.GetAnnotations()
-	if annotations[EndAnnotation] != "" || startID == "" {
-		return ctrl.Result{}, nil
-	}
-	return r.createEndAnnotation(ctx, obj, kind, imageRef, imageTag, startID)
-}
-
-func (r *WorkloadReconciler) createEndAnnotation(
-	ctx context.Context, obj client.Object,
-	kind, imageRef, imageTag, startID string,
-) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	id, err := createAnnotation(ctx, r.GClient, kind, obj.GetName(), obj.GetNamespace(), imageTag, imageRef, "completed")
-	if err != nil {
-		logger.Error(err, "Failed to create end annotation")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	if err := patchAnnotations(ctx, r.Client, obj, map[string]string{
-		EndAnnotation: strconv.FormatInt(id, 10),
-	}); err != nil {
-		logger.Error(err, "Failed to store end annotation")
-		return ctrl.Result{RequeueAfter: time.Minute}, err
-	}
-	if sid, err := strconv.ParseInt(startID, 10, 64); err == nil {
-		err := updateAnnotationToRegion(
-			ctx, r.GClient, sid, kind, obj.GetName(), obj.GetNamespace(), imageTag,
-		)
-		if err != nil {
-			logger.Error(err, "Failed to update start annotation to region", "startAnnotationID", sid)
+	if r.Adapter.IsReady(obj) {
+		if err := r.Lifecycle.CompleteDeployment(ctx, obj, kind, imageRef, imageTag); err != nil {
+			return ctrl.Result{RequeueAfter: time.Minute}, err
 		}
 	}
-	logger.Info("Workload completed", "kind", kind, "endAnnotationID", id)
 	return ctrl.Result{}, nil
 }
 
@@ -219,16 +126,12 @@ func (r *WorkloadReconciler) handleDeletion(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	if _, err := createAnnotation(ctx, r.GClient, kind, req.Name, req.Namespace, "", "", "deleted"); err != nil {
-		logger.Error(err, "Failed to create deletion annotation")
+	if err := r.Lifecycle.RecordDeletion(ctx, kind, req.Name, req.Namespace); err != nil {
 		return ctrl.Result{}, err
 	}
-	logger.Info("Created deletion annotation", "kind", kind, "name", req.Name, "namespace", req.Namespace)
 	return ctrl.Result{}, nil
 }
 
-// mapNamespaceToWorkloads enqueues all workloads in a namespace when its label changes,
-// or cleans up annotations when the label is removed.
 func (r *WorkloadReconciler) mapNamespaceToWorkloads(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	ns, ok := obj.(*corev1.Namespace)
@@ -243,13 +146,13 @@ func (r *WorkloadReconciler) mapNamespaceToWorkloads(ctx context.Context, obj cl
 		return nil
 	}
 
-	items := extractItems(list)
+	items := r.Adapter.ExtractItems(list)
 
 	if !enabled {
 		logger.Info("Namespace label removed, cleaning up",
 			"kind", r.Adapter.Kind(), "namespace", ns.Name, "count", len(items))
 		for _, item := range items {
-			_ = r.cleanupAnnotations(ctx, item)
+			_ = r.Lifecycle.CleanupAnnotations(ctx, item)
 		}
 		return nil
 	}
@@ -265,34 +168,6 @@ func (r *WorkloadReconciler) mapNamespaceToWorkloads(ctx context.Context, obj cl
 	return requests
 }
 
-func (r *WorkloadReconciler) cleanupAnnotations(ctx context.Context, obj client.Object) error {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		return nil
-	}
-	has := false
-	for _, k := range []string{StartAnnotation, EndAnnotation, VersionAnnotation} {
-		if _, ok := annotations[k]; ok {
-			has = true
-			break
-		}
-	}
-	if !has {
-		return nil
-	}
-	if err := patchAnnotations(ctx, r.Client, obj, map[string]string{
-		StartAnnotation: "", EndAnnotation: "", VersionAnnotation: "",
-	}); err != nil {
-		return err
-	}
-	log.FromContext(ctx).Info("Cleaned up annotations",
-		"kind", r.Adapter.Kind(),
-		"name", sanitizeForLog(obj.GetName()),
-		"namespace", sanitizeForLog(obj.GetNamespace()))
-	return nil
-}
-
-// mapReplicaSetToDeployment maps ReplicaSet events to their parent Deployment.
 func mapReplicaSetToDeployment(_ context.Context, obj client.Object) []reconcile.Request {
 	rs, ok := obj.(*appsv1.ReplicaSet)
 	if !ok {
@@ -308,46 +183,19 @@ func mapReplicaSetToDeployment(_ context.Context, obj client.Object) []reconcile
 	return nil
 }
 
-// SetupWithManager registers the controller with the manager.
 func (r *WorkloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(r.Adapter.NewObject(), builder.WithPredicates(specChangedPredicate(r.Adapter.WatchesStatus()))).
+		For(r.Adapter.NewObject(), builder.WithPredicates(specChangedPredicate(r.Adapter))).
 		Watches(&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.mapNamespaceToWorkloads),
 			builder.WithPredicates(namespaceLabelChangedPredicate())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: DefaultMaxConcurrentReconciles})
 
-	// Deployments detect completion via ReplicaSet events
 	if r.Adapter.Kind() == "deployment" {
 		b = b.Watches(&appsv1.ReplicaSet{}, handler.EnqueueRequestsFromMapFunc(mapReplicaSetToDeployment))
 	}
 
 	return b.Complete(r)
-}
-
-// extractItems pulls individual objects from a typed ObjectList.
-func extractItems(list client.ObjectList) []client.Object {
-	switch l := list.(type) {
-	case *appsv1.DeploymentList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
-	case *appsv1.StatefulSetList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
-	case *appsv1.DaemonSetList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
-	}
-	return nil
 }
 
 var _ reconcile.Reconciler = (*WorkloadReconciler)(nil)
