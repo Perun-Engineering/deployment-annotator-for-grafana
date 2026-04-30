@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	apputil "github.com/perun-engineering/deployment-annotator-for-grafana/internal/util"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,8 +65,8 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	logger.V(1).Info("Processing workload",
 		"kind", kind,
-		"name", apputil.SanitizeForLog(obj.GetName()),
-		"namespace", apputil.SanitizeForLog(obj.GetNamespace()),
+		"name", sanitizeForLog(obj.GetName()),
+		"namespace", sanitizeForLog(obj.GetNamespace()),
 		"generation", obj.GetGeneration())
 
 	return r.handleEvent(ctx, obj, kind)
@@ -75,8 +74,8 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 func (r *WorkloadReconciler) handleEvent(ctx context.Context, obj client.Object, kind string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	name := apputil.SanitizeForLog(obj.GetName())
-	ns := apputil.SanitizeForLog(obj.GetNamespace())
+	name := sanitizeForLog(obj.GetName())
+	ns := sanitizeForLog(obj.GetNamespace())
 
 	imageRef := r.Adapter.ContainerImage(obj)
 	if imageRef == "" {
@@ -84,7 +83,7 @@ func (r *WorkloadReconciler) handleEvent(ctx context.Context, obj client.Object,
 		return ctrl.Result{}, nil
 	}
 
-	imageTag := apputil.ExtractImageTag(imageRef)
+	imageTag := extractImageTag(imageRef)
 	currentVersion := r.Adapter.ComputeVersion(ctx, r.Client, obj, imageTag)
 	annotations := obj.GetAnnotations()
 	storedVersion := annotations[VersionAnnotation]
@@ -288,8 +287,8 @@ func (r *WorkloadReconciler) cleanupAnnotations(ctx context.Context, obj client.
 	}
 	log.FromContext(ctx).Info("Cleaned up annotations",
 		"kind", r.Adapter.Kind(),
-		"name", apputil.SanitizeForLog(obj.GetName()),
-		"namespace", apputil.SanitizeForLog(obj.GetNamespace()))
+		"name", sanitizeForLog(obj.GetName()),
+		"namespace", sanitizeForLog(obj.GetNamespace()))
 	return nil
 }
 

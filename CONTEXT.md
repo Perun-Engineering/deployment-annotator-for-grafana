@@ -15,6 +15,5 @@
 | Package | Responsibility |
 |---|---|
 | `main` | Wiring only: config, clients, manager, adapter registration |
-| `internal/controller` | `WorkloadReconciler` + `WorkloadAdapter` interface + three adapter implementations + shared helpers |
+| `internal/controller` | `WorkloadReconciler` + `WorkloadAdapter` interface + three adapter implementations + shared helpers (including log sanitization and image-tag extraction) |
 | `internal/grafana` | HTTP client for Grafana annotation API |
-| `internal/util` | `SanitizeForLog`, `ExtractImageTag` |

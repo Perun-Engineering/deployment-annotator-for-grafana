@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
-	apputil "github.com/perun-engineering/deployment-annotator-for-grafana/internal/util"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	appsv1 "k8s.io/api/apps/v1"
@@ -17,15 +17,40 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
+// sanitizeForLog removes characters that could be used for log injection attacks.
+func sanitizeForLog(input string) string {
+	s := strings.ReplaceAll(input, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\t", "")
+	return s
+}
+
+// extractImageTag returns a human-friendly version tag from an image reference.
+func extractImageTag(imageRef string) string {
+	if at := strings.LastIndex(imageRef, "@"); at != -1 {
+		digest := imageRef[at+1:]
+		if colon := strings.Index(digest, ":"); colon != -1 && len(digest) > colon+7 {
+			return digest[colon+1 : colon+8]
+		}
+		return digest
+	}
+	lastSlash := strings.LastIndex(imageRef, "/")
+	lastColon := strings.LastIndex(imageRef, ":")
+	if lastColon != -1 && lastColon > lastSlash {
+		return imageRef[lastColon+1:]
+	}
+	return "latest"
+}
+
 // createAnnotation builds and sends a Grafana annotation for a workload event.
 func createAnnotation(
 	ctx context.Context, gc AnnotationClient,
 	kind, name, namespace, imageTag, imageRef, eventType string,
 ) (int64, error) {
-	sName := apputil.SanitizeForLog(name)
-	sNS := apputil.SanitizeForLog(namespace)
-	sTag := apputil.SanitizeForLog(imageTag)
-	sRef := apputil.SanitizeForLog(imageRef)
+	sName := sanitizeForLog(name)
+	sNS := sanitizeForLog(namespace)
+	sTag := sanitizeForLog(imageTag)
+	sRef := sanitizeForLog(imageRef)
 	action := map[string]string{"started": "start", "completed": "end", "deleted": "delete"}[eventType]
 	what := fmt.Sprintf("deploy-%s:%s", action, sName)
 	if action == "" {
@@ -45,9 +70,9 @@ func updateAnnotationToRegion(
 ) error {
 	tags := []string{
 		"deploy",
-		apputil.SanitizeForLog(namespace),
-		apputil.SanitizeForLog(name),
-		apputil.SanitizeForLog(imageTag),
+		sanitizeForLog(namespace),
+		sanitizeForLog(name),
+		sanitizeForLog(imageTag),
 		"region", kind,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
