@@ -68,16 +68,21 @@ func main() {
 		{"WATCH_STATEFULSETS", controller.StatefulSetAdapter{}},
 		{"WATCH_DAEMONSETS", controller.DaemonSetAdapter{}},
 	}
+	lc := &controller.AnnotationLifecycle{
+		Client:  mgr.GetClient(),
+		GClient: gc,
+	}
+
 	for _, a := range adapters {
 		if !envBool(a.envKey, true) {
 			logger.Info("Watching disabled", "kind", a.adapter.Kind())
 			continue
 		}
 		r := &controller.WorkloadReconciler{
-			Client:  mgr.GetClient(),
-			Scheme:  mgr.GetScheme(),
-			GClient: gc,
-			Adapter: a.adapter,
+			Client:    mgr.GetClient(),
+			Scheme:    mgr.GetScheme(),
+			Adapter:   a.adapter,
+			Lifecycle: lc,
 		}
 		if err := r.SetupWithManager(mgr); err != nil {
 			logger.Error(err, "Failed to setup controller", "kind", a.adapter.Kind())
