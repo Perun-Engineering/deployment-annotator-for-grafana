@@ -14,6 +14,7 @@ type Client struct {
 	URL        string
 	APIKey     string
 	HTTPClient *http.Client
+	Now        func() time.Time // optional; defaults to time.Now
 }
 
 type Annotation struct {
@@ -34,7 +35,11 @@ type AnnotationPatch struct {
 }
 
 func (c *Client) CreateAnnotation(ctx context.Context, what string, tags []string, data string) (int64, error) {
-	payload := Annotation{What: what, Tags: tags, Data: data, When: time.Now().Unix()}
+	now := time.Now
+	if c.Now != nil {
+		now = c.Now
+	}
+	payload := Annotation{What: what, Tags: tags, Data: data, When: now().Unix()}
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return 0, fmt.Errorf("marshal: %w", err)
@@ -68,7 +73,11 @@ func (c *Client) CreateAnnotation(ctx context.Context, what string, tags []strin
 }
 
 func (c *Client) UpdateAnnotationToRegion(ctx context.Context, id int64, tags []string) error {
-	patch := AnnotationPatch{TimeEnd: time.Now().UnixMilli(), IsRegion: true, Tags: tags}
+	now := time.Now
+	if c.Now != nil {
+		now = c.Now
+	}
+	patch := AnnotationPatch{TimeEnd: now().UnixMilli(), IsRegion: true, Tags: tags}
 	jsonData, err := json.Marshal(patch)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
