@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.5](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.4...v1.5.5) (2026-05-01)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** configure semantic-release authentication for workflow_run trigger ([bd289a7](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/bd289a7c8afa1cf56acc60a4a0fa586c68c964de))
+* **ci:** hardcode checkout ref to prevent workflow_run code injection ([5570c4b](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/5570c4bc38dd3c0a1fe3f6b58eef6b522b9c1f8e))
+* **ci:** remove repositoryUrl to use checkout credentials for git push ([407edc1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/407edc1c97d513f87035c8158c70db527e1221aa))
+* **ci:** update Go version to 1.25 ([a18eef5](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/a18eef5be21468a1b18088c3124cd600a17c52c0))
+
+
+### ♻️ Code Refactoring
+
+* absorb extractContainerImage into WorkloadAdapter interface ([947a8e9](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/947a8e92173ea76d03fa712762727b8672633427))
+* dissolve internal/util package into internal/controller ([4fe62f2](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/4fe62f2f2fc44c7e4f263911269f7199b27df821))
+* extract AnnotationClient interface seam from concrete grafana.Client ([bfb2e4c](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/bfb2e4cae5c0c2a0c7aaacc78e37842ea0d1cc2d))
+* extract AnnotationLifecycle and complete adapter seam ([#102](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/102)) ([7e0a695](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/7e0a695fe63e956ceb5ddb915ed89a84fd6e3e0d))
+* inject time seam into grafana.Client for testability ([1fec16c](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/1fec16c47ccafed701e36d8d9fe455eecf71d623))
+* unify three reconcilers into single WorkloadReconciler with adapter pattern ([e9a3ad1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/e9a3ad1deed5cd5f7ea82729ba1cd572dbbefa66))
+
+
+### 📦 Dependencies
+
+* bump k8s.io/{api,apimachinery,client-go} to v0.35.4 ([#101](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/101)) ([dfd29fb](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/dfd29fb9c7f6eaf6b7dd4b3ecdb12eeb8cd9d182)), closes [#99](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/99) [#100](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/100) [#98](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/98) [#99](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/99) [#100](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/100)
+* **deps:** bump go.uber.org/zap from 1.27.0 to 1.27.1 ([4a4981b](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/4a4981b800423c8497f499f4f2a4297acd65b06b))
+* **deps:** bump golang from 1.25-alpine to 1.26-alpine ([e96a1d5](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/e96a1d5e5774023e9c3cb3a4b31b9f554d356561))
+* **deps:** bump golang.org/x/text from 0.30.0 to 0.32.0 ([c27f31d](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/c27f31df8cf8b54c5eb5b43446f6d3135fd76147))
+* **deps:** bump golang.org/x/text from 0.32.0 to 0.34.0 ([2b8665e](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/2b8665e6b7bd0983bd78fcc0f4f4f5c1ae68a6e5))
+* **deps:** bump golang.org/x/text from 0.34.0 to 0.36.0 ([554edb4](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/554edb46ba330e961d1e37c5948703fe3d0cab91))
+* **deps:** bump k8s.io/api from 0.34.1 to 0.34.3 ([2ebbe98](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/2ebbe985f28d13206fabd7e34895b3325735ec3e))
+* **deps:** bump k8s.io/api from 0.35.0 to 0.35.2 ([edbed97](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/edbed979d0265c02c46423c80a3a6b62403dedbb))
+* **deps:** bump k8s.io/apimachinery from 0.34.1 to 0.34.3 ([ba8675d](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/ba8675dc0fa13f95bbc3c74a948e72791ff775aa))
+* **deps:** bump k8s.io/apimachinery from 0.35.0 to 0.35.2 ([c7a688c](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/c7a688c4af237a5dd22e3cd5e1e546bd3d16c61a))
+* **deps:** bump k8s.io/client-go from 0.34.1 to 0.34.3 ([a45148f](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/a45148f4e17a1e3a6739207b9a6fb4a6e82ddd27))
+* **deps:** bump k8s.io/client-go from 0.34.3 to 0.35.0 ([026482b](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/026482b18a2bd8614253a8e845c641dc40c04411))
+* **deps:** bump k8s.io/client-go from 0.35.0 to 0.35.2 ([4f6831f](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/4f6831f79a0e33f47a0d84012d01bb839a6ea846))
+* **deps:** bump k8s.io/client-go from 0.35.2 to 0.35.3 ([aa618eb](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/aa618eb873c31751105159daa08a2bf7df1d47fa))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.22.3 to 0.22.4 ([dd06c80](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/dd06c80b47fa64b104de93d0f9d0bfa21db5506a))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.22.4 to 0.23.1 ([f50fdbf](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/f50fdbfc3cca3b5ecb135d034e36a5157c2fd3d5))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.23.1 to 0.23.3 ([325f805](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/325f805f60a7678fcce1c3453b1a910e0f4d1216))
+
 ## [1.5.4](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.3...v1.5.4) (2025-10-17)
 
 
