@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Semantic release with automated versioning
   semantic-release:
     name: Semantic Release
     runs-on: ubuntu-latest
@@ -19,14 +18,18 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    outputs:
+      new-release-published: ${{ steps.semantic.outputs.new_release_published }}
+      new-release-version: ${{ steps.semantic.outputs.new_release_version }}
+      new-release-git-tag: ${{ steps.semantic.outputs.new_release_git_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: true
-          token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -44,15 +47,17 @@ jobs:
             @semantic-release/exec@6
             conventional-changelog-conventionalcommits@7
         env:
-          GITHUB_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Output release information
-        if: steps.semantic.outputs.new-release-published == 'true'
-        run: |
-          echo "🎉 New release published!"
-          echo "Version: ${{ steps.semantic.outputs.new-release-version }}"
-          echo "Multi-arch images have been pre-validated and published."
-          echo "The 'Release' workflow will now publish:"
-          echo "- Helm chart to OCI registry with release tag"
-          echo "- Cross-platform binary releases"
-          echo "- Release artifacts and checksums"
+  release:
+    name: Release Artifacts
+    needs: semantic-release
+    if: needs.semantic-release.outputs.new-release-published == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.semantic-release.outputs.new-release-git-tag }}
+      version: ${{ needs.semantic-release.outputs.new-release-version }}
+    permissions:
+      contents: write
+      packages: write
+      security-events: write

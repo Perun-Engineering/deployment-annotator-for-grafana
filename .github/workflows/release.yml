@@ -3,6 +3,16 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "Release tag (e.g., v1.0.3)"
+        required: true
+        type: string
+      version:
+        description: "Release version without v prefix (e.g., 1.0.3)"
+        required: true
+        type: string
   workflow_dispatch: # Allow manual triggering
     inputs:
       release_tag:
@@ -25,7 +35,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
 
       - name: Set environment variables
         env:
@@ -39,10 +49,16 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
           INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "$EVENT_NAME" = "release" ]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            # Reusable workflow call - inputs are authoritative
+            TAG_NAME="$INPUT_TAG_NAME"
+            VERSION="$INPUT_VERSION"
+          elif [ "$EVENT_NAME" = "release" ]; then
             # Release event - use release data
             VERSION="$RELEASE_TAG_NAME"
             TAG_NAME="$RELEASE_TAG_NAME"
@@ -151,7 +167,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
 
       - name: Set environment variables
         env:
@@ -165,10 +181,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
           INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "$EVENT_NAME" = "release" ]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            TAG_NAME="$INPUT_TAG_NAME"
+            VERSION="$INPUT_VERSION"
+          elif [ "$EVENT_NAME" = "release" ]; then
             VERSION="$RELEASE_TAG_NAME"
             TAG_NAME="$RELEASE_TAG_NAME"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
@@ -264,10 +285,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
           INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "$EVENT_NAME" = "release" ]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ "$EVENT_NAME" = "release" ]; then
             VERSION="$RELEASE_TAG_NAME"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             if [ -n "$INPUT_RELEASE_TAG" ]; then
@@ -298,10 +322,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
           INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "$EVENT_NAME" = "release" ]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            TAG_NAME="$INPUT_TAG_NAME"
+            VERSION="$INPUT_VERSION"
+          elif [ "$EVENT_NAME" = "release" ]; then
             VERSION="$RELEASE_TAG_NAME"
             TAG_NAME="$RELEASE_TAG_NAME"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
