@@ -79,28 +79,18 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Run Static Analysis Security Scanner
-        run: |
-          echo "Installing reliable static analysis tools..."
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
-          echo "Running staticcheck for code quality analysis..."
-          staticcheck -f json ./... > staticcheck-results.json || true
-
-          echo "Running govulncheck for vulnerability scanning..."
-          govulncheck -json ./... > govulncheck-results.json || true
-
-          echo "Creating SARIF output for GitHub Security tab..."
-          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"ci-static-analysis","version":"1.0.0"}},"results":[]}]}' > gosec.sarif
-
-          echo "Static analysis completed successfully"
+      - name: Run gosec security scanner
+        run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('gosec.sarif') != ''
         with:
           sarif_file: gosec.sarif
+          category: gosec
 
   # Build and test
   test:
