@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.8](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.7...v1.5.8) (2026-05-31)
+
+
+### 📚 Documentation
+
+* add agent skills config and first ADR ([#110](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/issues/110)) ([762fc0e](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/762fc0e2b64bba472a1942c9d9619535d6313556))
+
 ## [1.5.7](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.6...v1.5.7) (2026-05-31)
 
 
