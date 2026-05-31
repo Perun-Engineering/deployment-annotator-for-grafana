@@ -249,42 +249,18 @@ jobs:
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git config --global url."https://".insteadOf "git://"
 
-      - name: Install Static Analysis Tools
-        run: |
-          echo "Go version: $(go version)"
-          echo "GOPATH: $(go env GOPATH)"
-          echo "GOPROXY: $(go env GOPROXY)"
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
-          # Install reliable static analysis tools that work with Go 1.24
-          echo "Installing staticcheck..."
-          go install honnef.co/go/tools/cmd/staticcheck@latest
+      - name: Run gosec
+        run: gosec -no-fail -fmt sarif -out gosec-results.sarif ./...
 
-          echo "Installing govulncheck..."
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-
-      - name: Run Static Analysis
-        run: |
-          echo "Running static analysis tools..."
-
-          # Run staticcheck for code quality issues
-          echo "Running staticcheck..."
-          staticcheck -f json ./... > staticcheck-results.json || true
-
-          # Run govulncheck for vulnerability scanning
-          echo "Running govulncheck..."
-          govulncheck -json ./... > govulncheck-results.json || true
-
-          # Create a basic SARIF file from the results
-          echo "Creating SARIF output..."
-          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"static-analysis-suite","version":"1.0.0","informationUri":"https://github.com/perun-engineering/deployment-annotator-for-grafana","rules":[]}},"results":[]}]}' > gosec-results.sarif
-
-          echo "Static analysis completed successfully"
-
-      - name: Upload Static Analysis results
+      - name: Upload gosec results
         uses: github/codeql-action/upload-sarif@v4
         if: always() && hashFiles('gosec-results.sarif') != ''
         with:
           sarif_file: gosec-results.sarif
+          category: gosec
 
       - name: Install Semgrep
         run: python3 -m pip install semgrep
