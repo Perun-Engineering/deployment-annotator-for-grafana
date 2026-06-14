@@ -2,8 +2,8 @@ apiVersion: v2
 name: deployment-annotator-controller
 description: A Kubernetes Controller that creates Grafana annotations for deployment events
 type: application
-version: 1.5.8
-appVersion: "1.5.8"
+version: 1.5.9
+appVersion: "1.5.9"
 keywords:
   - grafana
   - kubernetes
