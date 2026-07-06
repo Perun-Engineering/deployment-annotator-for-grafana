@@ -24,7 +24,7 @@ jobs:
       new-release-git-tag: ${{ steps.semantic.outputs.new_release_git_tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
