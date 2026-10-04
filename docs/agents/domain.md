@@ -6,7 +6,7 @@ This is a **single-context** repo.
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root — domain vocabulary and package layout.
+- **`GLOSSARY.md`** at the repo root — domain vocabulary and package layout.
 - **`docs/adr/`** — read ADRs that touch the area you're about to work in (directory may not exist yet).
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The producer skill (`/grill-with-docs`) creates them lazily when terms or decisions actually get resolved.
@@ -15,14 +15,14 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 
 ```
 /
-├── CONTEXT.md
+├── GLOSSARY.md
 ├── docs/adr/            ← created lazily by /grill-with-docs
 └── internal/
 ```
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md` (e.g. Workload, Tracked namespace, Annotation lifecycle, Adapter, AnnotationClient, Completion detection). Don't drift to synonyms the glossary explicitly avoids.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md` (e.g. Workload, Tracked namespace, Annotation lifecycle, Adapter, AnnotationClient, Completion detection). Don't drift to synonyms the glossary explicitly avoids.
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/grill-with-docs`).
 

@@ -28,4 +28,4 @@ The `WorkloadReconciler` keeps orchestration only (fetch, namespace check, versi
 - The consumer-side interface keeps `internal/controller` free of a hard dependency on `internal/grafana`.
 - Adapter implementations concentrate the per-kind complexity; they are the place to look when a kind behaves unexpectedly.
 
-See `CONTEXT.md` for the domain vocabulary (Workload, Adapter, AnnotationClient, Annotation lifecycle, Completion detection).
+See `GLOSSARY.md` for the domain vocabulary (Workload, Adapter, AnnotationClient, Annotation lifecycle, Completion detection).
