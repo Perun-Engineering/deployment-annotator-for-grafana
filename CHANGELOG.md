@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- semantic-release-generated changelog -->
 
+## [1.5.12](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.11...v1.5.12) (2026-10-04)
+
+
+### 📚 Documentation
+
+* rename CONTEXT.md to GLOSSARY.md ([0eae863](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/0eae8632c8639ec02dbc2f915d78caaeec4bea52))
+
+
+### 📦 Dependencies
+
+* **deps:** bump golang from 1.26-alpine to 1.27-alpine ([eead3ed](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/eead3ed5d578fc332b34133a6d037a857ddc4b17))
+* **deps:** bump golang.org/x/text from 0.40.0 to 0.41.0 ([52aebfb](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/52aebfb48ca493712c97493ef3da2fa85122074b))
+* **deps:** bump golang.org/x/text from 0.41.0 to 0.42.0 ([001c3c1](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/001c3c133d6136fcd5645df4030f9a82e2ea531b))
+* **deps:** bump k8s.io/api from 0.36.3 to 0.36.4 ([c71bfe8](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/c71bfe8365e262d20e01281ee5667292961a4289))
+* **deps:** bump k8s.io/api from 0.37.0 to 0.37.1 ([7f288c8](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/7f288c84c3df41ce53297b90d47d7182607bf0ac))
+* **deps:** bump k8s.io/apimachinery from 0.36.3 to 0.36.4 ([666c7e7](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/666c7e75b3003508c8783170d79c66f76a88efdd))
+* **deps:** bump k8s.io/apimachinery from 0.36.4 to 0.37.0 ([93db51c](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/93db51c5bcf4c361633ce982ebb1a8d0f601825c))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.24.1 to 0.25.0 ([9c02e61](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/9c02e61bf80fbbcab26f00ee43155c3ffba06274))
+* **deps:** bump sigs.k8s.io/controller-runtime from 0.25.0 to 0.25.1 ([0483e77](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/commit/0483e77874563bd10128aa800da935c5c881e8eb))
+
 ## [1.5.11](https://github.com/Perun-Engineering/deployment-annotator-for-grafana/compare/v1.5.10...v1.5.11) (2026-08-15)
 
 
