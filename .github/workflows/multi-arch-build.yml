@@ -246,6 +246,7 @@ jobs:
       - name: Build summary
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           PREREQ_RESULT: ${{ needs.check-prerequisites.result }}
           BUILD_RESULT: ${{ needs.build-multi-arch.result }}
@@ -266,7 +267,7 @@ jobs:
           echo "| Security Scan | $SCAN_RESULT |"
           echo ""
 
-          if [ "$EVENT_NAME" != "pull_request" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$REF" = "refs/heads/main" ]; then
             # Sanitize branch name for Docker tag (replace / with -)
             TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
             echo "**Built Image**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}\`"
@@ -280,7 +281,7 @@ jobs:
           fi
 
           # For pull requests, prerequisites are skipped (expected), so only check build result
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
             if [[ "$BUILD_RESULT" == "success" ]]; then
               echo ""
               echo "✅ Multi-arch build completed successfully for PR!"
