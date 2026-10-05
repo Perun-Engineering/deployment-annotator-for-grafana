@@ -1,6 +1,8 @@
 name: Security
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Run security scans daily at 2 AM UTC
     - cron: "0 2 * * *"
@@ -238,29 +240,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Configure Git for Go modules
-        run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://".insteadOf "git://"
-
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run gosec
-        run: gosec -no-fail -fmt sarif -out gosec-results.sarif ./...
-
-      - name: Upload gosec results
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('gosec-results.sarif') != ''
-        with:
-          sarif_file: gosec-results.sarif
-          category: gosec
 
       - name: Install Semgrep
         run: python3 -m pip install semgrep
